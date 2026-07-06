@@ -7,6 +7,7 @@ services:
   # External dependencies
   redis:
     image: redis:alpine
+    container_name: redis-j7vrlerr67hcw5p67o3b5dh4
     restart: always
     volumes:
       - "/mailu/redis:/data"
@@ -18,6 +19,7 @@ services:
   # Core services
   front:
     image: ${DOCKER_ORG:-ghcr.io/mailu}/${DOCKER_PREFIX:-}nginx:${MAILU_VERSION:-2.0}
+    container_name: front-j7vrlerr67hcw5p67o3b5dh4
     restart: always
     env_file: .env
     logging:
@@ -44,6 +46,7 @@ services:
 
   resolver:
     image: ${DOCKER_ORG:-ghcr.io/mailu}/${DOCKER_PREFIX:-}unbound:${MAILU_VERSION:-2.0}
+    container_name: resolver-j7vrlerr67hcw5p67o3b5dh4
     env_file: .env
     logging:
       driver: journald
@@ -55,6 +58,7 @@ services:
 
   admin:
     image: ${DOCKER_ORG:-ghcr.io/mailu}/${DOCKER_PREFIX:-}admin:${MAILU_VERSION:-2.0}
+    container_name: admin-j7vrlerr67hcw5p67o3b5dh4
     restart: always
     env_file: .env
     logging:
@@ -72,6 +76,7 @@ services:
 
   imap:
     image: ${DOCKER_ORG:-ghcr.io/mailu}/${DOCKER_PREFIX:-}dovecot:${MAILU_VERSION:-2.0}
+    container_name: imap-j7vrlerr67hcw5p67o3b5dh4
     restart: always
     env_file: .env
     logging:
@@ -89,6 +94,7 @@ services:
 
   smtp:
     image: ${DOCKER_ORG:-ghcr.io/mailu}/${DOCKER_PREFIX:-}postfix:${MAILU_VERSION:-2.0}
+    container_name: smtp-j7vrlerr67hcw5p67o3b5dh4
     restart: always
     env_file: .env
     logging:
@@ -106,6 +112,7 @@ services:
 
   antispam:
     image: ${DOCKER_ORG:-ghcr.io/mailu}/${DOCKER_PREFIX:-}rspamd:${MAILU_VERSION:-2.0}
+    container_name: antispam-j7vrlerr67hcw5p67o3b5dh4
     hostname: antispam
     restart: always
     env_file: .env
@@ -126,6 +133,7 @@ services:
   # Webmail
   webmail:
     image: ${DOCKER_ORG:-ghcr.io/mailu}/${DOCKER_PREFIX:-}webmail:${MAILU_VERSION:-2.0}
+    container_name: webmail-j7vrlerr67hcw5p67o3b5dh4
     restart: always
     env_file: .env
     logging:
