@@ -1,1 +1,0 @@
-domain name of an IDN domain in the DKIM signature needs to follow RFC6376; puny encoding the domain name when rspamd accesses the vault;

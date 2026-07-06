@@ -1,37 +1,28 @@
-<p align="leftr"><img src="docs/assets/logomark.png" alt="Mailu" height="200px"></p>
+# Docker Mailserver - arzzi.xyz
 
+This repository contains the configuration for a production-ready, simplified mail server setup using **docker-mailserver** and **Roundcube Webmail** managed via Coolify.
 
-Mailu is a simple yet full-featured mail server as a set of Docker images.
-It is free software (both as in free beer and as in free speech), open to
-suggestions and external contributions. The project aims at providing people
-with an easily setup, easily maintained and full-featured mail server while
-not shipping proprietary software nor unrelated features often found in
-popular groupware.
+## Services
 
-Most of the documentation is available on our [Website](https://mailu.io).
-You can also [try our demo server](https://mailu.io/master/demo.html)
-before setting up your own.
+1. **Mailserver** (`ghcr.io/docker-mailserver/docker-mailserver:latest`)
+   - Full stack single-container mail server.
+   - Includes SMTP (Postfix), IMAP (Dovecot), Antispam (Rspamd), and Fail2ban.
+   - ClamAV is disabled to conserve RAM.
 
-Features
-========
+2. **Webmail** (`roundcube/roundcubemail:latest`)
+   - Light-weight modern webmail interface accessible via HTTP.
+   - Connected to the Mailserver container internally.
 
-Main features include:
+## Administration
 
-- **Standard email server**, IMAP and IMAP+, SMTP and Submission with auto-configuration profiles for clients
-- **Advanced email features**, aliases, domain aliases, custom routing, full-text search of email attachments
-- **Web access**, multiple Webmails and administration interface
-- **User features**, aliases, auto-reply, auto-forward, fetched accounts, managesieve
-- **Admin features**, global admins, announcements, per-domain delegation, quotas
-- **Security**, enforced TLS, DANE, MTA-STS, Letsencrypt!, outgoing DKIM, anti-virus scanner, [Snuffleupagus](https://github.com/jvoisin/snuffleupagus/), block malicious attachments
-- **Antispam**, auto-learn, greylisting, DMARC and SPF, anti-spoofing
-- **Freedom**, all FOSS components, no tracker included
+To add email accounts and generate DKIM keys, run the following commands on the VPS:
 
-![Domains](docs/assets/screenshots/domains.png)
+### Add Email Account
+```bash
+docker exec -it mailserver-j7vrlerr67hcw5p67o3b5dh4 setup email add user@arzzi.xyz "yourpassword"
+```
 
-Contributing
-============
-
-Mailu is free software, open to suggestions and contributions. All
-components are free software and compatible with the MIT license. All
-specific configuration files, Dockerfiles and code are placed under the
-MIT license.
+### Generate DKIM Keys
+```bash
+docker exec -it mailserver-j7vrlerr67hcw5p67o3b5dh4 setup config dkim
+```

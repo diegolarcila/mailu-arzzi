@@ -1,1 +1,0 @@
-Define client_ip variable in _proxy method. Fixes server error when using proxy authentication

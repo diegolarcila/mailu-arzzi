@@ -1,9 +1,0 @@
-{%- extends "fetch/create.html" %}
-
-{%- block title %}
-{% trans %}Update a fetched account{% endtrans %}
-{%- endblock %}
-
-{%- block subtitle %}
-#{{ fetch.id }}: {{ fetch.protocol }}{{ 's' if fetch.tls else '' }}://{{ fetch.host }}:{{ fetch.port }}
-{%- endblock %}
