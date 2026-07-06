@@ -14,6 +14,8 @@ services:
       - resolver
     dns:
       - 192.168.203.254
+    networks:
+      - default
 
   # Core services
   front:
@@ -72,6 +74,8 @@ services:
       - resolver
     dns:
       - 192.168.203.254
+    networks:
+      - default
 
   imap:
     image: ${DOCKER_ORG:-ghcr.io/mailu}/${DOCKER_PREFIX:-}dovecot:${MAILU_VERSION:-2.0}
@@ -108,6 +112,8 @@ services:
       - resolver
     dns:
       - 192.168.203.254
+    networks:
+      - default
 
 
 
@@ -149,6 +155,7 @@ services:
       - "/mailu/webmail:/data"
       - "/mailu/overrides/roundcube:/overrides:ro"
     networks:
+      - default
       - webmail
     depends_on:
       - front
