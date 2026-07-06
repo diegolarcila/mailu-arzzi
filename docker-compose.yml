@@ -12,8 +12,6 @@ services:
       - "/mailu/redis:/data"
     depends_on:
       - resolver
-    dns:
-      - 192.168.210.254
     networks:
       - default
 
@@ -43,8 +41,6 @@ services:
       - "/mailu/overrides/nginx:/overrides:ro"
     depends_on:
       - resolver
-    dns:
-      - 192.168.210.254
 
   resolver:
     image: ${DOCKER_ORG:-ghcr.io/mailu}/${DOCKER_PREFIX:-}unbound:${MAILU_VERSION:-2.0}
@@ -55,8 +51,7 @@ services:
         tag: mailu-resolver
     restart: always
     networks:
-      default:
-        ipv4_address: 192.168.210.254
+      - default
 
   admin:
     image: ${DOCKER_ORG:-ghcr.io/mailu}/${DOCKER_PREFIX:-}admin:${MAILU_VERSION:-2.0}
@@ -72,8 +67,6 @@ services:
     depends_on:
       - redis
       - resolver
-    dns:
-      - 192.168.210.254
     networks:
       - default
 
@@ -93,8 +86,6 @@ services:
     depends_on:
       - front
       - resolver
-    dns:
-      - 192.168.210.254
 
   smtp:
     image: ${DOCKER_ORG:-ghcr.io/mailu}/${DOCKER_PREFIX:-}postfix:${MAILU_VERSION:-2.0}
@@ -110,12 +101,8 @@ services:
     depends_on:
       - front
       - resolver
-    dns:
-      - 192.168.210.254
     networks:
       - default
-
-
 
   antispam:
     image: ${DOCKER_ORG:-ghcr.io/mailu}/${DOCKER_PREFIX:-}rspamd:${MAILU_VERSION:-2.0}
@@ -135,12 +122,6 @@ services:
       - front
       - redis
       - resolver
-    dns:
-      - 192.168.210.254
-
-  # Optional services
-
-
 
   # Webmail
   webmail:
@@ -163,9 +144,5 @@ services:
 networks:
   default:
     driver: bridge
-    ipam:
-      driver: default
-      config:
-        - subnet: 192.168.210.0/24
   webmail:
     driver: bridge
