@@ -387,10 +387,6 @@ services:
             res.status(500).json({ error: err.message });
           }
         });
-          } catch (err) {
-            res.status(500).json({ error: err.message });
-          }
-        });
 
         app.get('/', (req, res) => {
           res.sendFile(path.join(__dirname, 'views', 'index.html'));
