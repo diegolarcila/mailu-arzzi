@@ -75,8 +75,7 @@ services:
           "dependencies": {
             "express": "^4.19.2",
             "nodemailer": "^6.9.13",
-            "otplib": "^12.0.1",
-            "cookie-parser": "^1.4.6"
+            "otplib": "^12.0.1"
           }
         }
         EOF
@@ -86,7 +85,6 @@ services:
         const path = require('path');
         const http = require('http');
         const nodemailer = require('nodemailer');
-        const cookieParser = require('cookie-parser');
         const { authenticator } = require('otplib');
 
         const app = express();
@@ -99,10 +97,10 @@ services:
 
         app.use(express.json());
         app.use(express.urlencoded({ extended: true }));
-        app.use(cookieParser());
 
         function checkAuth(req, res, next) {
-          if (req.cookies && req.cookies.session === SESSION_TOKEN) {
+          const token = req.headers['x-session-token'];
+          if (token === SESSION_TOKEN) {
             return next();
           }
           res.status(401).json({ error: 'Unauthorized. Please login.' });
@@ -205,15 +203,13 @@ services:
 
           const isValid = authenticator.check(code, TOTP_SECRET);
           if (isValid) {
-            res.cookie('session', SESSION_TOKEN, { maxAge: 30 * 24 * 60 * 60 * 1000, httpOnly: true });
-            return res.json({ success: true });
+            return res.json({ success: true, token: SESSION_TOKEN });
           } else {
             return res.status(400).json({ error: 'Código inválido o expirado' });
           }
         });
 
         app.post('/api/logout', (req, res) => {
-          res.clearCookie('session');
           res.json({ success: true });
         });
 
@@ -249,7 +245,6 @@ services:
                 });
             }
 
-            // Manage registered domains list
             let registeredDomains = [];
             if (fs.existsSync(domainsPath)) {
               try {
@@ -262,7 +257,6 @@ services:
               fs.writeFileSync(domainsPath, JSON.stringify(registeredDomains, null, 2), 'utf8');
             }
 
-            // Sync any domain found in accounts that isn't in domains.json yet
             let synced = false;
             foundDomains.forEach(d => {
               if (!registeredDomains.includes(d)) {
@@ -550,16 +544,6 @@ services:
                   </button>
                 </form>
                 <div id="loginStatus" class="mt-4 text-center text-sm text-red-400 hidden"></div>
-                
-                <div class="mt-8 pt-6 border-t border-gray-900 text-left">
-                  <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Configurar Authenticator:</h4>
-                  <ol class="text-[11px] text-gray-400 list-decimal pl-4 space-y-1">
-                    <li>Abre tu app Google Authenticator en el celular.</li>
-                    <li>Agrega cuenta con **Ingresar clave de configuración**.</li>
-                    <li>Nombre: <strong class="text-gray-300">DMS Manager</strong></li>
-                    <li>Clave: <strong class="text-indigo-400 font-mono">ARZZIWEBMAILMANAGERSECRETAUTH</strong></li>
-                  </ol>
-                </div>
               </div>
             </div>
 
@@ -770,7 +754,10 @@ services:
 
             async function loadData() {
               try {
-                const res = await fetch('/api/data');
+                const token = localStorage.getItem('session') || '';
+                const res = await fetch('/api/data', {
+                  headers: { 'x-session-token': token }
+                });
                 if (res.status === 401) {
                   document.getElementById('loginView').classList.remove('hidden');
                   document.getElementById('clientsView').classList.add('hidden');
@@ -839,7 +826,6 @@ services:
             }
 
             function renderDomainDetails() {
-              // 1. Render Accounts
               const accountsTable = document.getElementById('accountsTable');
               accountsTable.innerHTML = '';
               const filteredAccounts = globalData.accounts.filter(a => a.domain === currentDomain);
@@ -860,7 +846,6 @@ services:
                 });
               }
 
-              // 2. Render DNS Data
               const dnsContainer = document.getElementById('dnsContainer');
               dnsContainer.innerHTML = '';
               const domainData = globalData.dnsData.find(d => d.domain === currentDomain);
@@ -1001,7 +986,10 @@ services:
               try {
                 const res = await fetch('/api/accounts/delete', {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
+                  headers: { 
+                    'Content-Type': 'application/json',
+                    'x-session-token': localStorage.getItem('session') || ''
+                  },
                   body: JSON.stringify({ email: emailToDelete })
                 });
                 const r = await res.json();
@@ -1057,7 +1045,10 @@ services:
               try {
                 const res = await fetch('/api/accounts/send-instructions', {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
+                  headers: { 
+                    'Content-Type': 'application/json',
+                    'x-session-token': localStorage.getItem('session') || ''
+                  },
                   body: JSON.stringify({ email: emailForInstructions, targetEmail: target, tempPassword })
                 });
                 const r = await res.json();
@@ -1099,6 +1090,7 @@ services:
                 });
                 const r = await res.json();
                 if (res.ok && r.success) {
+                  localStorage.setItem('session', r.token);
                   document.getElementById('totpCode').value = '';
                   await loadData();
                 } else {
@@ -1115,13 +1107,9 @@ services:
             });
 
             async function logout() {
-              try {
-                await fetch('/api/logout', { method: 'POST' });
-                showClientsView();
-                await loadData();
-              } catch (err) {
-                console.error(err);
-              }
+              localStorage.removeItem('session');
+              showClientsView();
+              await loadData();
             }
 
             // Registrar nuevo cliente (Dominio)
@@ -1140,7 +1128,10 @@ services:
               try {
                 const res = await fetch('/api/domains', {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
+                  headers: { 
+                    'Content-Type': 'application/json',
+                    'x-session-token': localStorage.getItem('session') || ''
+                  },
                   body: JSON.stringify({ domain })
                 });
                 const r = await res.json();
@@ -1154,7 +1145,7 @@ services:
                   status.innerText = 'Error: ' + r.error;
                 }
               } catch (err) {
-                status.className = 'mt-4 text-center text-sm text-red-400';
+                status.className = 'mt-4 text-center text-sm text-red-450';
                 status.innerText = 'Error de conexión.';
               } finally {
                 btn.disabled = false;
@@ -1181,7 +1172,10 @@ services:
               try {
                 const res = await fetch('/api/accounts', {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
+                  headers: { 
+                    'Content-Type': 'application/json',
+                    'x-session-token': localStorage.getItem('session') || ''
+                  },
                   body: JSON.stringify({ email, password, quota })
                 });
                 const r = await res.json();
@@ -1221,7 +1215,10 @@ services:
               try {
                 const res = await fetch('/api/accounts/update', {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
+                  headers: { 
+                    'Content-Type': 'application/json',
+                    'x-session-token': localStorage.getItem('session') || ''
+                  },
                   body: JSON.stringify({ email, password, quota })
                 });
                 const r = await res.json();
