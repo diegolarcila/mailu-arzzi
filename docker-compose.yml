@@ -73,7 +73,8 @@ services:
           "version": "1.0.0",
           "main": "server.js",
           "dependencies": {
-            "express": "^4.19.2"
+            "express": "^4.19.2",
+            "nodemailer": "^6.9.13"
           }
         }
         EOF
@@ -82,6 +83,7 @@ services:
         const fs = require('fs');
         const path = require('path');
         const http = require('http');
+        const nodemailer = require('nodemailer');
 
         const app = express();
         const PORT = 3000;
@@ -155,6 +157,32 @@ services:
           });
           return output;
         }
+
+        async function execInMailserverRaw(cmd) {
+          const containerId = await getMailserverContainerId();
+          if (!containerId) throw new Error('Mailserver container is offline.');
+
+          const execSetup = await dockerRequest('POST', '/containers/' + containerId + '/exec', {
+            AttachStdout: true,
+            AttachStderr: true,
+            Cmd: cmd
+          });
+
+          const output = await dockerRequest('POST', '/exec/' + execSetup.Id + '/start', {
+            Detach: false,
+            Tty: false
+          });
+          return output;
+        }
+
+        const transporter = nodemailer.createTransport({
+          host: 'mailserver',
+          port: 25,
+          secure: false,
+          tls: {
+            rejectUnauthorized: false
+          }
+        });
 
         app.get('/api/data', async (req, res) => {
           try {
@@ -248,6 +276,117 @@ services:
               }
             }
             res.json({ success: true });
+          } catch (err) {
+            res.status(500).json({ error: err.message });
+          }
+        });
+
+        app.post('/api/accounts/delete', async (req, res) => {
+          const { email } = req.body;
+          if (!email) return res.status(400).json({ error: 'Email is required' });
+
+          try {
+            await execInMailserver(['email', 'del', email]);
+            const [user, domain] = email.split('@');
+            if (user && domain) {
+              await execInMailserverRaw(['rm', '-rf', '/var/mail/' + domain + '/' + user]);
+            }
+            res.json({ success: true });
+          } catch (err) {
+            res.status(500).json({ error: err.message });
+          }
+        });
+
+        app.post('/api/accounts/send-instructions', async (req, res) => {
+          const { email, targetEmail } = req.body;
+          if (!email || !targetEmail) return res.status(400).json({ error: 'Email and target email are required' });
+
+          const mailOptions = {
+            from: '"Soporte Técnico" <postmaster@arzzi.xyz>',
+            to: targetEmail,
+            subject: 'Configuración de tu cuenta de correo: ' + email,
+            html: `
+              <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px; background-color: #fcfcfc;">
+                <h2 style="color: #4f46e5; margin-bottom: 20px; text-align: center; font-weight: 600;">Detalles de Configuración de Correo</h2>
+                <p style="color: #374151; font-size: 15px; line-height: 1.6;">Hola,</p>
+                <p style="color: #374151; font-size: 15px; line-height: 1.6;">A continuación encontrarás los parámetros oficiales para configurar tu nueva cuenta de correo corporativo en tu cliente favorito (Outlook, Thunderbird, Mail de Apple o tu celular Android/iPhone):</p>
+                
+                <div style="background-color: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                  <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                    <tr>
+                      <td style="padding: 6px 0; color: #6b7280; font-weight: 500; width: 40%;">Dirección de Correo:</td>
+                      <td style="padding: 6px 0; color: #111827; font-weight: bold; font-family: monospace;">${email}</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 6px 0; color: #6b7280; font-weight: 500;">Nombre de Usuario:</td>
+                      <td style="padding: 6px 0; color: #111827; font-weight: bold; font-family: monospace;">${email}</td>
+                    </tr>
+                  </table>
+                </div>
+
+                <h3 style="color: #111827; font-size: 16px; margin-top: 25px; border-bottom: 2px solid #e5e7eb; padding-bottom: 8px;">1. Configuración Recomendada (IMAP - Seguro)</h3>
+                <p style="color: #6b7280; font-size: 12px; margin-top: -8px;">Mantiene los correos sincronizados en todos tus dispositivos.</p>
+                <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 20px;">
+                  <tr style="border-bottom: 1px solid #f3f4f6;">
+                    <td style="padding: 8px 0; color: #4b5563; font-weight: 500;">Servidor de Entrada:</td>
+                    <td style="padding: 8px 0; color: #111827; font-family: monospace;">mail.arzzi.xyz</td>
+                  </tr>
+                  <tr style="border-bottom: 1px solid #f3f4f6;">
+                    <td style="padding: 8px 0; color: #4b5563; font-weight: 500;">Puerto de Entrada:</td>
+                    <td style="padding: 8px 0; color: #111827; font-family: monospace;">993</td>
+                  </tr>
+                  <tr style="border-bottom: 1px solid #f3f4f6;">
+                    <td style="padding: 8px 0; color: #4b5563; font-weight: 500;">Método de Encriptación:</td>
+                    <td style="padding: 8px 0; color: #059669; font-weight: bold;">SSL / TLS</td>
+                  </tr>
+                </table>
+
+                <h3 style="color: #111827; font-size: 16px; margin-top: 20px; border-bottom: 2px solid #e5e7eb; padding-bottom: 8px;">2. Configuración Opcional (POP3 - Descarga Local)</h3>
+                <p style="color: #6b7280; font-size: 12px; margin-top: -8px;">Descarga los correos del servidor a tu equipo local.</p>
+                <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 20px;">
+                  <tr style="border-bottom: 1px solid #f3f4f6;">
+                    <td style="padding: 8px 0; color: #4b5563; font-weight: 500;">Servidor de Entrada:</td>
+                    <td style="padding: 8px 0; color: #111827; font-family: monospace;">mail.arzzi.xyz</td>
+                  </tr>
+                  <tr style="border-bottom: 1px solid #f3f4f6;">
+                    <td style="padding: 8px 0; color: #4b5563; font-weight: 500;">Puerto de Entrada:</td>
+                    <td style="padding: 8px 0; color: #111827; font-family: monospace;">995</td>
+                  </tr>
+                  <tr style="border-bottom: 1px solid #f3f4f6;">
+                    <td style="padding: 8px 0; color: #4b5563; font-weight: 500;">Método de Encriptación:</td>
+                    <td style="padding: 8px 0; color: #059669; font-weight: bold;">SSL / TLS</td>
+                  </tr>
+                </table>
+
+                <h3 style="color: #111827; font-size: 16px; margin-top: 20px; border-bottom: 2px solid #e5e7eb; padding-bottom: 8px;">3. Servidor de Salida (SMTP - Envío)</h3>
+                <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 20px;">
+                  <tr style="border-bottom: 1px solid #f3f4f6;">
+                    <td style="padding: 8px 0; color: #4b5563; font-weight: 500;">Servidor de Salida:</td>
+                    <td style="padding: 8px 0; color: #111827; font-family: monospace;">mail.arzzi.xyz</td>
+                  </tr>
+                  <tr style="border-bottom: 1px solid #f3f4f6;">
+                    <td style="padding: 8px 0; color: #4b5563; font-weight: 500;">Puerto de Salida (Recomendado):</td>
+                    <td style="padding: 8px 0; color: #111827; font-family: monospace;">465 (SSL/TLS) o 587 (STARTTLS)</td>
+                  </tr>
+                  <tr style="border-bottom: 1px solid #f3f4f6;">
+                    <td style="padding: 8px 0; color: #4b5563; font-weight: 500;">Autenticación Requerida:</td>
+                    <td style="padding: 8px 0; color: #059669; font-weight: bold;">Sí (Mismas credenciales de entrada)</td>
+                  </tr>
+                </table>
+
+                <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+                <p style="color: #9ca3af; font-size: 11px; text-align: center;">Este es un correo automático de configuración del sistema de correo corporativo.</p>
+              </div>
+            `
+          };
+
+          try {
+            await transporter.sendMail(mailOptions);
+            res.json({ success: true });
+          } catch (err) {
+            res.status(500).json({ error: err.message });
+          }
+        });
           } catch (err) {
             res.status(500).json({ error: err.message });
           }
@@ -416,13 +555,15 @@ services:
                  if (data.accounts.length === 0) {
                   accountsTable.innerHTML = '<tr><td colspan="4" class="py-4 text-center text-gray-500">No hay cuentas creadas aún.</td></tr>';
                 } else {
-                  data.accounts.forEach(acc => {
+                    data.accounts.forEach(acc => {
                     accountsTable.innerHTML += '<tr class="hover:bg-gray-900/30 transition">' +
                       '<td class="py-3 font-medium">' + acc.email + '</td>' +
                       '<td class="py-3 text-gray-400">' + acc.domain + '</td>' +
                       '<td class="py-3 text-gray-400">' + acc.quota + '</td>' +
-                      '<td class="py-3 text-right">' +
-                        '<button onclick="startEdit(\'' + acc.email + '\', \'' + acc.quota + '\')" class="text-xs bg-indigo-600/30 text-indigo-400 hover:bg-indigo-600 hover:text-white px-3 py-1 rounded-lg transition">Editar</button>' +
+                      '<td class="py-3 text-right space-x-1">' +
+                        '<button onclick="startSendInstructions(\'' + acc.email + '\')" class="text-xs bg-blue-600/30 text-blue-400 hover:bg-blue-600 hover:text-white px-2 py-1 rounded-lg transition" title="Enviar Instrucciones">Instrucciones</button>' +
+                        '<button onclick="startEdit(\'' + acc.email + '\', \'' + acc.quota + '\')" class="text-xs bg-indigo-600/30 text-indigo-400 hover:bg-indigo-600 hover:text-white px-2 py-1 rounded-lg transition">Editar</button>' +
+                        '<button onclick="startDelete(\'' + acc.email + '\')" class="text-xs bg-red-650/30 text-red-400 hover:bg-red-600 hover:text-white px-2 py-1 rounded-lg transition">Eliminar</button>' +
                       '</td>' +
                     '</tr>';
                   });
@@ -546,7 +687,110 @@ services:
 
             function cancelEdit() {
               document.getElementById('editCard').classList.add('hidden');
-            }document.getElementById('createForm').addEventListener('submit', async (e) => {
+            }
+
+            let emailToDelete = '';
+            function startDelete(email) {
+              emailToDelete = email;
+              document.getElementById('deleteEmailDisplay').innerText = email;
+              document.getElementById('deleteModal').classList.remove('hidden');
+              document.getElementById('deleteModalStatus').classList.add('hidden');
+            }
+
+            function closeDeleteModal() {
+              document.getElementById('deleteModal').classList.add('hidden');
+            }
+
+            async function confirmDelete() {
+              const btn = document.getElementById('confirmDeleteBtn');
+              const status = document.getElementById('deleteModalStatus');
+              btn.disabled = true;
+              btn.innerText = 'Eliminando...';
+              status.className = 'mt-4 text-center text-sm text-blue-400';
+              status.innerText = 'Borrando cuenta y limpiando archivos de correo...';
+              status.classList.remove('hidden');
+
+              try {
+                const res = await fetch('/api/accounts/delete', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ email: emailToDelete })
+                });
+                const r = await res.json();
+                if (res.ok && r.success) {
+                  status.className = 'mt-4 text-center text-sm text-green-400';
+                  status.innerText = '¡Cuenta eliminada correctamente!';
+                  setTimeout(() => {
+                    closeDeleteModal();
+                  }, 1200);
+                  await loadData();
+                } else {
+                  status.className = 'mt-4 text-center text-sm text-red-400';
+                  status.innerText = 'Error: ' + (r.error || 'No se pudo eliminar la cuenta.');
+                }
+              } catch (err) {
+                status.className = 'mt-4 text-center text-sm text-red-400';
+                status.innerText = 'Error de conexión.';
+              } finally {
+                btn.disabled = false;
+                btn.innerText = 'Eliminar permanentemente';
+              }
+            }
+
+            let emailForInstructions = '';
+            function startSendInstructions(email) {
+              emailForInstructions = email;
+              document.getElementById('instructionsEmail').value = email;
+              document.getElementById('instructionsTargetEmail').value = '';
+              document.getElementById('instructionsModal').classList.remove('hidden');
+              document.getElementById('instructionsModalStatus').classList.add('hidden');
+            }
+
+            function closeSendInstructionsModal() {
+              document.getElementById('instructionsModal').classList.add('hidden');
+            }
+
+            async function confirmSendInstructions() {
+              const target = document.getElementById('instructionsTargetEmail').value;
+              if (!target) {
+                alert('Por favor escribe un correo destinatario.');
+                return;
+              }
+              const btn = document.getElementById('confirmSendInstructionsBtn');
+              const status = document.getElementById('instructionsModalStatus');
+              btn.disabled = true;
+              btn.innerText = 'Enviando...';
+              status.className = 'mt-4 text-center text-sm text-blue-400';
+              status.innerText = 'Enviando correo con instrucciones...';
+              status.classList.remove('hidden');
+
+              try {
+                const res = await fetch('/api/accounts/send-instructions', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ email: emailForInstructions, targetEmail: target })
+                });
+                const r = await res.json();
+                if (res.ok && r.success) {
+                  status.className = 'mt-4 text-center text-sm text-green-400';
+                  status.innerText = '¡Instrucciones enviadas correctamente!';
+                  setTimeout(() => {
+                    closeSendInstructionsModal();
+                  }, 1200);
+                } else {
+                  status.className = 'mt-4 text-center text-sm text-red-400';
+                  status.innerText = 'Error: ' + (r.error || 'No se pudieron enviar las instrucciones.');
+                }
+              } catch (err) {
+                status.className = 'mt-4 text-center text-sm text-red-400';
+                status.innerText = 'Error de conexión.';
+              } finally {
+                btn.disabled = false;
+                btn.innerText = 'Enviar Correo';
+              }
+            }
+
+            document.getElementById('createForm').addEventListener('submit', async (e) => {
               e.preventDefault();
               const email = document.getElementById('email').value;
               const password = document.getElementById('password').value;
@@ -630,8 +874,55 @@ services:
 
             loadData();
           </script>
+
+          <!-- Modal de Eliminación (Doble Confirmación) -->
+          <div id="deleteModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center hidden z-50">
+            <div class="glass p-8 rounded-2xl max-w-md w-full mx-4 shadow-2xl border border-red-500/20">
+              <h3 class="text-xl font-bold text-red-450 mb-4 flex items-center gap-2">⚠️ Confirmar Eliminación</h3>
+              <p class="text-sm text-gray-300 mb-6">
+                ¿Estás seguro de que deseas eliminar permanentemente la cuenta <strong id="deleteEmailDisplay" class="text-white"></strong>?
+                <br><br>
+                <span class="text-red-400 font-semibold">Esta acción es irreversible y borrará físicamente todos sus correos y archivos adjuntos del servidor.</span>
+              </p>
+              <div class="flex gap-3 justify-end">
+                <button onclick="closeDeleteModal()" class="px-4 py-2 bg-gray-800 hover:bg-gray-700 transition rounded-xl font-medium text-sm">
+                  Cancelar
+                </button>
+                <button onclick="confirmDelete()" id="confirmDeleteBtn" class="px-5 py-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 transition rounded-xl font-medium text-sm shadow-lg shadow-red-900/40 text-white">
+                  Eliminar permanentemente
+                </button>
+              </div>
+              <div id="deleteModalStatus" class="mt-4 text-center text-sm hidden"></div>
+            </div>
+          </div>
+
+          <!-- Modal de Envío de Instrucciones -->
+          <div id="instructionsModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center hidden z-50">
+            <div class="glass p-8 rounded-2xl max-w-md w-full mx-4 shadow-2xl border border-indigo-500/20">
+              <h3 class="text-xl font-bold text-indigo-400 mb-4 flex items-center gap-2">📬 Enviar Instrucciones</h3>
+              <p class="text-sm text-gray-300 mb-4">
+                Enviaremos las configuraciones de puertos y servidores para configurar la cuenta en dispositivos móviles o aplicaciones de escritorio.
+              </p>
+              <div class="space-y-4">
+                <div>
+                  <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Cuenta a configurar</label>
+                  <input type="text" id="instructionsEmail" readonly class="w-full px-4 py-3 bg-gray-950 border border-gray-900 rounded-xl focus:outline-none text-sm text-gray-400 cursor-not-allowed">
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Correo destinatario</label>
+                  <input type="email" id="instructionsTargetEmail" placeholder="correo-alternativo@cliente.com" class="w-full px-4 py-3 bg-gray-900 border border-gray-850 rounded-xl focus:border-indigo-500 focus:outline-none transition text-sm text-gray-200">
+                </div>
+              </div>
+              <div class="flex gap-3 justify-end mt-6">
+                <button onclick="closeSendInstructionsModal()" class="px-4 py-2 bg-gray-800 hover:bg-gray-700 transition rounded-xl font-medium text-sm">
+                  Cancelar
+                </button>
+                <button onclick="confirmSendInstructions()" id="confirmSendInstructionsBtn" class="px-5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 transition rounded-xl font-medium text-sm shadow-lg shadow-indigo-900/40 text-white">
+                  Enviar Correo
+                </button>
+              </div>
+              <div id="instructionsModalStatus" class="mt-4 text-center text-sm hidden"></div>
+            </div>
+          </div>
         </body>
         </html>
-        EOF
-        npm install --only=production
-        node server.js
