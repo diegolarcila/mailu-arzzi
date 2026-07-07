@@ -188,8 +188,10 @@ services:
           try {
             const accountsPath = path.join(CONFIG_DIR, 'postfix-accounts.cf');
             const quotasPath = path.join(CONFIG_DIR, 'dovecot-quotas.cf');
+            const domainsPath = path.join(CONFIG_DIR, 'domains.json');
+            
             let accounts = [];
-            let domains = new Set();
+            let foundDomains = new Set();
             const quotas = {};
 
             if (fs.existsSync(quotasPath)) {
@@ -209,13 +211,38 @@ services:
                 .map(line => {
                   const [email] = line.split('|');
                   const domain = email.split('@')[1];
-                  domains.add(domain);
+                  foundDomains.add(domain);
                   return { email, domain, quota: quotas[email] || 'Ilimitado' };
                 });
             }
 
+            // Manage registered domains list
+            let registeredDomains = [];
+            if (fs.existsSync(domainsPath)) {
+              try {
+                registeredDomains = JSON.parse(fs.readFileSync(domainsPath, 'utf8'));
+              } catch (e) {
+                registeredDomains = [];
+              }
+            } else {
+              registeredDomains = Array.from(foundDomains);
+              fs.writeFileSync(domainsPath, JSON.stringify(registeredDomains, null, 2), 'utf8');
+            }
+
+            // Sync any domain found in accounts that isn't in domains.json yet
+            let synced = false;
+            foundDomains.forEach(d => {
+              if (!registeredDomains.includes(d)) {
+                registeredDomains.push(d);
+                synced = true;
+              }
+            });
+            if (synced) {
+              fs.writeFileSync(domainsPath, JSON.stringify(registeredDomains, null, 2), 'utf8');
+            }
+
             const dnsData = {};
-            for (const domain of domains) {
+            for (const domain of registeredDomains) {
               let dkim = 'DNSSEC/DKIM keys not generated yet. Add email account to generate.';
               const dkimPath = path.join(CONFIG_DIR, 'opendkim/keys/' + domain + '/mail.txt');
               if (fs.existsSync(dkimPath)) {
@@ -236,7 +263,39 @@ services:
               };
             }
 
-            res.json({ accounts, dnsData: Object.entries(dnsData).map(([domain, records]) => ({ domain, ...records })) });
+            res.json({ 
+              accounts, 
+              domains: registeredDomains, 
+              dnsData: Object.entries(dnsData).map(([domain, records]) => ({ domain, ...records })) 
+            });
+          } catch (err) {
+            res.status(500).json({ error: err.message });
+          }
+        });
+
+        app.post('/api/domains', async (req, res) => {
+          const { domain } = req.body;
+          if (!domain) return res.status(400).json({ error: 'Domain is required' });
+
+          const domainClean = domain.trim().toLowerCase();
+          const domainsPath = path.join(CONFIG_DIR, 'domains.json');
+          let registeredDomains = [];
+
+          try {
+            if (fs.existsSync(domainsPath)) {
+              try {
+                registeredDomains = JSON.parse(fs.readFileSync(domainsPath, 'utf8'));
+              } catch (e) {
+                registeredDomains = [];
+              }
+            }
+
+            if (!registeredDomains.includes(domainClean)) {
+              registeredDomains.push(domainClean);
+              fs.writeFileSync(domainsPath, JSON.stringify(registeredDomains, null, 2), 'utf8');
+            }
+
+            res.json({ success: true });
           } catch (err) {
             res.status(500).json({ error: err.message });
           }
@@ -298,8 +357,18 @@ services:
         });
 
         app.post('/api/accounts/send-instructions', async (req, res) => {
-          const { email, targetEmail } = req.body;
+          const { email, targetEmail, tempPassword } = req.body;
           if (!email || !targetEmail) return res.status(400).json({ error: 'Email and target email are required' });
+
+          const passwordRow = tempPassword 
+            ? `<tr>
+                 <td style="padding: 6px 0; color: #6b7280; font-weight: 500;">Contraseña Temporal:</td>
+                 <td style="padding: 6px 0; color: #111827; font-weight: bold; font-family: monospace;">${tempPassword}</td>
+               </tr>`
+            : `<tr>
+                 <td style="padding: 6px 0; color: #6b7280; font-weight: 500;">Contraseña:</td>
+                 <td style="padding: 6px 0; color: #9ca3af; font-style: italic;">[Usa la contraseña asignada por tu administrador]</td>
+               </tr>`;
 
           const mailOptions = {
             from: '"Soporte Técnico" <postmaster@arzzi.xyz>',
@@ -321,7 +390,12 @@ services:
                       <td style="padding: 6px 0; color: #6b7280; font-weight: 500;">Nombre de Usuario:</td>
                       <td style="padding: 6px 0; color: #111827; font-weight: bold; font-family: monospace;">${email}</td>
                     </tr>
+                    ${passwordRow}
                   </table>
+                </div>
+
+                <div style="text-align: center; margin: 30px 0;">
+                  <a href="https://webmail.arzzi.xyz" style="background-color: #4f46e5; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 15px; display: inline-block;">Acceder al Webmail</a>
                 </div>
 
                 <h3 style="color: #111827; font-size: 16px; margin-top: 25px; border-bottom: 2px solid #e5e7eb; padding-bottom: 8px;">1. Configuración Recomendada (IMAP - Seguro)</h3>
@@ -375,6 +449,7 @@ services:
                 </table>
 
                 <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+                <p style="color: #6b7280; font-size: 13px;">Nota de seguridad: Si deseas cambiar la contraseña de tu cuenta, solicítala directamente a tu administrador Diego.</p>
                 <p style="color: #9ca3af; font-size: 11px; text-align: center;">Este es un correo automático de configuración del sistema de correo corporativo.</p>
               </div>
             `
@@ -402,7 +477,7 @@ services:
         <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>DMS Manager — Panel de Control</title>
+          <title>DMS Manager — Panel de Control Multi-Cliente</title>
           <script src="https://cdn.tailwindcss.com"></script>
           <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
           <style>
@@ -420,226 +495,351 @@ services:
         </head>
         <body class="min-h-screen p-6 md:p-12">
           <div class="max-w-6xl mx-auto">
-            <header class="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 gap-4">
-              <div>
-                <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-500">
-                  DMS Manager
-                </h1>
-                <p class="text-gray-400 mt-1">Administración de clientes y configuración DNS automática</p>
-              </div>
-            </header>
-
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              <div class="lg:col-span-1">
-                <div class="glass p-6 rounded-2xl shadow-xl">
-                  <h2 class="text-xl font-semibold mb-6 flex items-center gap-2 text-indigo-400">
-                    ✉️ Crear Cuenta de Correo
-                  </h2>
-                  <form id="createForm" class="space-y-4">
-                    <div>
-                      <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Correo Completo</label>
-                      <input type="email" id="email" required placeholder="contacto@cliente.com" class="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-xl focus:border-indigo-500 focus:outline-none transition text-sm text-gray-200">
-                    </div>
-                    <div>
-                      <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Contraseña</label>
-                      <div class="relative">
-                        <input type="password" id="password" required placeholder="••••••••" class="w-full pl-4 pr-12 py-3 bg-gray-900 border border-gray-800 rounded-xl focus:border-indigo-500 focus:outline-none transition text-sm text-gray-200">
-                        <button type="button" onclick="togglePassword()" class="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-indigo-400 transition">
-                          <span id="eyeIcon">👁️</span>
-                        </button>
-                      </div>
-                    </div>
-                    <div>
-                      <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Límite de Almacenamiento (Cuota)</label>
-                      <select id="quota" class="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-xl focus:border-indigo-500 focus:outline-none transition text-sm text-gray-200">
-                        <option value="">Ilimitado</option>
-                        <option value="250M">250 MB</option>
-                        <option value="500M">500 MB</option>
-                        <option value="1G" selected>1 GB</option>
-                        <option value="2G">2 GB</option>
-                        <option value="5G">5 GB</option>
-                        <option value="10G">10 GB</option>
-                      </select>
-                    </div>
-                    <button type="submit" id="submitBtn" class="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 transition rounded-xl font-medium text-sm shadow-lg shadow-indigo-900/40">
-                      Crear Cuenta y Registrar DNS
-                    </button>
-                  </form>
-                  <div id="statusMsg" class="mt-4 text-center text-sm hidden"></div>
+            
+            <!-- Vista 1: Listado de Clientes -->
+            <div id="clientsView" class="space-y-8">
+              <header class="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 gap-4">
+                <div>
+                  <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-500">
+                    Panel de Clientes (Dominios)
+                  </h1>
+                  <p class="text-gray-400 mt-1">Registra nuevos clientes y selecciona a quién deseas configurar o modificar.</p>
                 </div>
+              </header>
 
-                <!-- Card Editar Cuenta (Oculto por defecto) -->
-                <div id="editCard" class="glass p-6 rounded-2xl shadow-xl mt-8 hidden">
-                  <h2 class="text-xl font-semibold mb-6 flex items-center gap-2 text-indigo-400">
-                    ✏️ Editar Cuenta de Correo
-                  </h2>
-                  <form id="editForm" class="space-y-4">
-                    <div>
-                      <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Correo</label>
-                      <input type="email" id="editEmail" readonly class="w-full px-4 py-3 bg-gray-950 border border-gray-900 rounded-xl focus:outline-none text-sm text-gray-400 cursor-not-allowed">
-                    </div>
-                    <div>
-                      <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Nueva Contraseña</label>
-                      <div class="relative">
-                        <input type="password" id="editPassword" placeholder="Dejar en blanco para mantener" class="w-full pl-4 pr-12 py-3 bg-gray-900 border border-gray-800 rounded-xl focus:border-indigo-500 focus:outline-none transition text-sm text-gray-200">
-                        <button type="button" onclick="toggleEditPassword()" class="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-indigo-400 transition">
-                          <span id="editEyeIcon">👁️</span>
-                        </button>
+              <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <!-- Columna Izquierda: Crear Cliente -->
+                <div class="lg:col-span-1">
+                  <div class="glass p-6 rounded-2xl shadow-xl">
+                    <h2 class="text-xl font-semibold mb-6 flex items-center gap-2 text-indigo-400">
+                      ➕ Registrar Nuevo Cliente
+                    </h2>
+                    <form id="createDomainForm" class="space-y-4">
+                      <div>
+                        <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Dominio del Cliente</label>
+                        <input type="text" id="newDomainName" required placeholder="cliente.com" class="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-xl focus:border-indigo-500 focus:outline-none transition text-sm text-gray-200">
                       </div>
-                    </div>
-                    <div>
-                      <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Límite de Almacenamiento (Cuota)</label>
-                      <select id="editQuota" class="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-xl focus:border-indigo-500 focus:outline-none transition text-sm text-gray-200">
-                        <option value="">Ilimitado</option>
-                        <option value="250M">250 MB</option>
-                        <option value="500M">500 MB</option>
-                        <option value="1G">1 GB</option>
-                        <option value="2G">2 GB</option>
-                        <option value="5G">5 GB</option>
-                        <option value="10G">10 GB</option>
-                      </select>
-                    </div>
-                    <div class="flex gap-2">
-                      <button type="submit" id="editSubmitBtn" class="flex-1 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 transition rounded-xl font-medium text-sm shadow-lg shadow-indigo-900/40">
-                        Guardar Cambios
+                      <button type="submit" id="createDomainBtn" class="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 transition rounded-xl font-medium text-sm shadow-lg shadow-indigo-900/40">
+                        Registrar Cliente
                       </button>
-                      <button type="button" onclick="cancelEdit()" class="px-4 py-3 bg-gray-800 hover:bg-gray-700 transition rounded-xl font-medium text-sm">
-                        Cancelar
-                      </button>
-                    </div>
-                  </form>
-                  <div id="editStatusMsg" class="mt-4 text-center text-sm hidden"></div>
-                </div>
-              </div>
-
-              <div class="lg:col-span-2 space-y-8">
-                <div class="glass p-6 rounded-2xl shadow-xl">
-                  <h2 class="text-xl font-semibold mb-6 text-indigo-400">👥 Cuentas de Correo Activas</h2>
-                  <div class="overflow-x-auto">
-                    <table class="w-full text-left">
-                      <thead>
-                        <tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wider">
-                          <th class="pb-3 font-semibold">Dirección de Correo</th>
-                          <th class="pb-3 font-semibold">Dominio</th>
-                          <th class="pb-3 font-semibold">Cuota</th>
-                          <th class="pb-3 font-semibold text-right">Acciones</th>
-                        </tr>
-                      </thead>
-                      <tbody id="accountsTable" class="divide-y divide-gray-900 text-sm text-gray-300">
-                      </tbody>
-                    </table>
+                    </form>
+                    <div id="createDomainStatus" class="mt-4 text-center text-sm hidden"></div>
                   </div>
                 </div>
 
-                <div class="glass p-6 rounded-2xl shadow-xl">
-                  <h2 class="text-xl font-semibold mb-6 text-indigo-400">⚙️ Configuración DNS por Dominio</h2>
-                  <div id="dnsContainer" class="space-y-6">
+                <!-- Columna Derecha: Tabla de Clientes -->
+                <div class="lg:col-span-2">
+                  <div class="glass p-6 rounded-2xl shadow-xl">
+                    <h2 class="text-xl font-semibold mb-6 text-indigo-400">📂 Clientes Registrados</h2>
+                    <div class="overflow-x-auto">
+                      <table class="w-full text-left">
+                        <thead>
+                          <tr class="border-b border-gray-800 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                            <th class="pb-3">Nombre del Dominio</th>
+                            <th class="pb-3">Cuentas Creadas</th>
+                            <th class="pb-3 text-right">Acción</th>
+                          </tr>
+                        </thead>
+                        <tbody id="domainsTableBody" class="divide-y divide-gray-850 text-sm">
+                          <!-- Generado dinámicamente -->
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
+
+            <!-- Vista 2: Administración del Cliente Seleccionado -->
+            <div id="domainDetailView" class="space-y-8 hidden">
+              <header class="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 gap-4">
+                <div>
+                  <div class="flex items-center gap-2 text-xs text-gray-400 font-semibold mb-2">
+                    <button onclick="showClientsView()" class="hover:text-blue-400 transition">🏠 Clientes</button>
+                    <span>/</span>
+                    <span id="breadcrumbDomain" class="text-indigo-400"></span>
+                  </div>
+                  <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-500">
+                    Gestión de Cuentas & DNS
+                  </h1>
+                </div>
+                <button onclick="showClientsView()" class="px-5 py-2.5 bg-gray-850 hover:bg-gray-800 border border-gray-800 text-sm font-semibold rounded-xl transition flex items-center gap-2">
+                  ⬅️ Volver a Clientes
+                </button>
+              </header>
+
+              <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <!-- Columna Izquierda: Crear Cuenta (Dominio Locked) -->
+                <div class="lg:col-span-1 space-y-8">
+                  <div class="glass p-6 rounded-2xl shadow-xl">
+                    <h2 class="text-xl font-semibold mb-6 flex items-center gap-2 text-indigo-400">
+                      ✉️ Crear Cuenta de Correo
+                    </h2>
+                    <form id="createForm" class="space-y-4">
+                      <div>
+                        <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Correo</label>
+                        <div class="flex">
+                          <input type="text" id="emailPrefix" required placeholder="contacto" class="flex-1 min-w-0 px-4 py-3 bg-gray-900 border border-gray-800 rounded-l-xl focus:border-indigo-500 focus:outline-none transition text-sm text-gray-200">
+                          <span id="domainSuffix" class="inline-flex items-center px-4 rounded-r-xl border border-l-0 border-gray-800 bg-gray-950 text-sm text-gray-400 font-mono">
+                            @dominio.com
+                          </span>
+                        </div>
+                      </div>
+                      <div>
+                        <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Contraseña</label>
+                        <div class="relative">
+                          <input type="password" id="password" required placeholder="••••••••" class="w-full pl-4 pr-12 py-3 bg-gray-900 border border-gray-800 rounded-xl focus:border-indigo-500 focus:outline-none transition text-sm text-gray-200">
+                          <button type="button" onclick="togglePassword()" class="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-indigo-400 transition">
+                            <span id="eyeIcon">👁️</span>
+                          </button>
+                        </div>
+                      </div>
+                      <div>
+                        <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Límite de Almacenamiento (Cuota)</label>
+                        <select id="quota" class="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-xl focus:border-indigo-500 focus:outline-none transition text-sm text-gray-200">
+                          <option value="">Ilimitado</option>
+                          <option value="250M">250 MB</option>
+                          <option value="500M">500 MB</option>
+                          <option value="1G" selected>1 GB</option>
+                          <option value="2G">2 GB</option>
+                          <option value="5G">5 GB</option>
+                          <option value="10G">10 GB</option>
+                        </select>
+                      </div>
+                      <button type="submit" id="submitBtn" class="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 transition rounded-xl font-medium text-sm shadow-lg shadow-indigo-900/40">
+                        Crear Cuenta y Registrar DNS
+                      </button>
+                    </form>
+                    <div id="statusMsg" class="mt-4 text-center text-sm hidden"></div>
+                  </div>
+
+                  <!-- Card Editar Cuenta (Oculto por defecto) -->
+                  <div id="editCard" class="glass p-6 rounded-2xl shadow-xl hidden">
+                    <h2 class="text-xl font-semibold mb-6 flex items-center gap-2 text-indigo-400">
+                      ✏️ Editar Cuenta de Correo
+                    </h2>
+                    <form id="editForm" class="space-y-4">
+                      <div>
+                        <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Correo</label>
+                        <input type="email" id="editEmail" readonly class="w-full px-4 py-3 bg-gray-950 border border-gray-900 rounded-xl focus:outline-none text-sm text-gray-400 cursor-not-allowed">
+                      </div>
+                      <div>
+                        <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Nueva Contraseña</label>
+                        <div class="relative">
+                          <input type="password" id="editPassword" placeholder="Dejar en blanco para mantener" class="w-full pl-4 pr-12 py-3 bg-gray-900 border border-gray-800 rounded-xl focus:border-indigo-500 focus:outline-none transition text-sm text-gray-200">
+                          <button type="button" onclick="toggleEditPassword()" class="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-indigo-400 transition">
+                            <span id="editEyeIcon">👁️</span>
+                          </button>
+                        </div>
+                      </div>
+                      <div>
+                        <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Límite de Almacenamiento (Cuota)</label>
+                        <select id="editQuota" class="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-xl focus:border-indigo-500 focus:outline-none transition text-sm text-gray-200">
+                          <option value="">Ilimitado</option>
+                          <option value="250M">250 MB</option>
+                          <option value="500M">500 MB</option>
+                          <option value="1G">1 GB</option>
+                          <option value="2G">2 GB</option>
+                          <option value="5G">5 GB</option>
+                          <option value="10G">10 GB</option>
+                        </select>
+                      </div>
+                      <div class="flex gap-2">
+                        <button type="submit" id="editSubmitBtn" class="flex-1 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 transition rounded-xl font-medium text-sm shadow-lg shadow-indigo-900/40">
+                          Guardar
+                        </button>
+                        <button type="button" onclick="cancelEdit()" class="px-4 py-3 bg-gray-800 hover:bg-gray-700 transition rounded-xl font-medium text-sm">
+                          Cancelar
+                        </button>
+                      </div>
+                    </form>
+                    <div id="editStatusMsg" class="mt-4 text-center text-sm hidden"></div>
+                  </div>
+                </div>
+
+                <!-- Columna Derecha: Tabla de Cuentas y DNS del Cliente -->
+                <div class="lg:col-span-2 space-y-8">
+                  <div class="glass p-6 rounded-2xl shadow-xl">
+                    <h2 class="text-xl font-semibold mb-6 text-indigo-400">👥 Cuentas de Correo Activas</h2>
+                    <div class="overflow-x-auto">
+                      <table class="w-full text-left">
+                        <thead>
+                          <tr class="border-b border-gray-800 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                            <th class="pb-3">Dirección de Correo</th>
+                            <th class="pb-3">Cuota</th>
+                            <th class="pb-3 text-right">Acciones</th>
+                          </tr>
+                        </thead>
+                        <tbody id="accountsTable" class="divide-y divide-gray-850 text-sm">
+                          <!-- Generado dinámicamente -->
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div class="glass p-6 rounded-2xl shadow-xl">
+                    <h2 class="text-xl font-semibold mb-6 text-indigo-400">⚙️ Configuración DNS por Dominio</h2>
+                    <div id="dnsContainer" class="space-y-6">
+                      <!-- Tablas DNS dinámicas -->
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
           </div>
 
           <script>
+            let globalData = { accounts: [], domains: [], dnsData: [] };
+            let currentDomain = '';
+
             async function loadData() {
               try {
                 const res = await fetch('/api/data');
-                const data = await res.json();
-
-                const accountsTable = document.getElementById('accountsTable');
-                accountsTable.innerHTML = '';
-                 if (data.accounts.length === 0) {
-                  accountsTable.innerHTML = '<tr><td colspan="4" class="py-4 text-center text-gray-500">No hay cuentas creadas aún.</td></tr>';
-                } else {
-                    data.accounts.forEach(acc => {
-                    accountsTable.innerHTML += '<tr class="hover:bg-gray-900/30 transition">' +
-                      '<td class="py-3 font-medium">' + acc.email + '</td>' +
-                      '<td class="py-3 text-gray-400">' + acc.domain + '</td>' +
-                      '<td class="py-3 text-gray-400">' + acc.quota + '</td>' +
-                      '<td class="py-3 text-right space-x-1">' +
-                        '<button onclick="startSendInstructions(\'' + acc.email + '\')" class="text-xs bg-blue-600/30 text-blue-400 hover:bg-blue-600 hover:text-white px-2 py-1 rounded-lg transition" title="Enviar Instrucciones">Instrucciones</button>' +
-                        '<button onclick="startEdit(\'' + acc.email + '\', \'' + acc.quota + '\')" class="text-xs bg-indigo-600/30 text-indigo-400 hover:bg-indigo-600 hover:text-white px-2 py-1 rounded-lg transition">Editar</button>' +
-                        '<button onclick="startDelete(\'' + acc.email + '\')" class="text-xs bg-red-650/30 text-red-400 hover:bg-red-600 hover:text-white px-2 py-1 rounded-lg transition">Eliminar</button>' +
-                      '</td>' +
-                    '</tr>';
-                  });
-                }
-
-                const dnsContainer = document.getElementById('dnsContainer');
-                dnsContainer.innerHTML = '';
-                if (data.dnsData.length === 0) {
-                  dnsContainer.innerHTML = '<p class="text-gray-500 text-sm">Crea una cuenta para ver la información DNS de su dominio.</p>';
-                } else {
-                  data.dnsData.forEach(domainData => {
-                    dnsContainer.innerHTML += '<div class="p-6 bg-gray-900/40 border border-gray-800 rounded-xl space-y-4">' +
-                      '<h3 class="font-bold text-lg text-blue-400 flex justify-between items-center">' +
-                        '<span>' + domainData.domain + '</span>' +
-                        '<span class="text-xs font-normal text-gray-400">DNS Config</span>' +
-                      '</h3>' +
-                      '<div class="overflow-x-auto">' +
-                        '<table class="w-full text-left text-xs">' +
-                          '<thead>' +
-                            '<tr class="border-b border-gray-800 text-gray-400 uppercase tracking-wider">' +
-                              '<th class="pb-2 font-semibold">Tipo</th>' +
-                              '<th class="pb-2 font-semibold">Nombre / Host</th>' +
-                              '<th class="pb-2 font-semibold">Valor / Destino</th>' +
-                              '<th class="pb-2 font-semibold text-right">Acciones</th>' +
-                            '</tr>' +
-                          '</thead>' +
-                          '<tbody class="divide-y divide-gray-900 text-gray-300">' +
-                            '<tr class="hover:bg-gray-900/20 transition">' +
-                              '<td class="py-3"><span class="bg-blue-900/30 text-blue-400 px-2 py-0.5 rounded font-mono">A</span></td>' +
-                              '<td class="py-3 font-mono">mail</td>' +
-                              '<td class="py-3 font-mono text-gray-450">173.212.255.14</td>' +
-                              '<td class="py-3 text-right space-x-1 shrink-0">' +
-                                '<button onclick="copyText(\'mail\')" class="bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded text-[10px] transition">Copiar Host</button>' +
-                                '<button onclick="copyText(\'173.212.255.14\')" class="bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded text-[10px] transition">Copiar Valor</button>' +
-                              '</td>' +
-                            '</tr>' +
-                            '<tr class="hover:bg-gray-900/20 transition">' +
-                              '<td class="py-3"><span class="bg-green-900/30 text-green-400 px-2 py-0.5 rounded font-mono">MX</span></td>' +
-                              '<td class="py-3 font-mono">@</td>' +
-                              '<td class="py-3 font-mono text-gray-450">mail.arzzi.xyz (Prioridad 10)</td>' +
-                              '<td class="py-3 text-right space-x-1 shrink-0">' +
-                                '<button onclick="copyText(\'@\')" class="bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded text-[10px] transition">Copiar Host</button>' +
-                                '<button onclick="copyText(\'mail.arzzi.xyz\')" class="bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded text-[10px] transition">Copiar Valor</button>' +
-                              '</td>' +
-                            '</tr>' +
-                            '<tr class="hover:bg-gray-900/20 transition">' +
-                              '<td class="py-3"><span class="bg-purple-900/30 text-purple-400 px-2 py-0.5 rounded font-mono">TXT</span></td>' +
-                              '<td class="py-3 font-mono">@</td>' +
-                              '<td class="py-3 font-mono text-green-300 break-all">' + domainData.spf + '</td>' +
-                              '<td class="py-3 text-right space-x-1 shrink-0">' +
-                                '<button onclick="copyText(\'@\')" class="bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded text-[10px] transition">Copiar Host</button>' +
-                                '<button onclick="copyText(\'' + domainData.spf + '\')" class="bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded text-[10px] transition">Copiar Valor</button>' +
-                              '</td>' +
-                            '</tr>' +
-                            '<tr class="hover:bg-gray-900/20 transition">' +
-                              '<td class="py-3"><span class="bg-purple-900/30 text-purple-400 px-2 py-0.5 rounded font-mono">TXT</span></td>' +
-                              '<td class="py-3 font-mono">mail._domainkey</td>' +
-                              '<td class="py-3 font-mono text-purple-300 break-all select-all block max-h-16 overflow-y-auto">' + domainData.dkim + '</td>' +
-                              '<td class="py-3 text-right space-x-1 shrink-0">' +
-                                '<button onclick="copyText(\'mail._domainkey\')" class="bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded text-[10px] transition">Copiar Host</button>' +
-                                '<button onclick="copyText(\'' + domainData.dkim + '\')" class="bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded text-[10px] transition">Copiar Valor</button>' +
-                              '</td>' +
-                            '</tr>' +
-                            '<tr class="hover:bg-gray-900/20 transition">' +
-                              '<td class="py-3"><span class="bg-purple-900/30 text-purple-400 px-2 py-0.5 rounded font-mono">TXT</span></td>' +
-                              '<td class="py-3 font-mono">_dmarc</td>' +
-                              '<td class="py-3 font-mono text-indigo-300 break-all">' + domainData.dmarc + '</td>' +
-                              '<td class="py-3 text-right space-x-1 shrink-0">' +
-                                '<button onclick="copyText(\'_dmarc\')" class="bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded text-[10px] transition">Copiar Host</button>' +
-                                '<button onclick="copyText(\'' + domainData.dmarc + '\')" class="bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded text-[10px] transition">Copiar Valor</button>' +
-                              '</td>' +
-                            '</tr>' +
-                          '</tbody>' +
-                        '</table>' +
-                      '</div>' +
-                    '</div>';
-                  });
+                globalData = await res.json();
+                
+                renderDomainsTable();
+                if (currentDomain) {
+                  renderDomainDetails();
                 }
               } catch (err) {
-                console.error(err);
+                console.error("Error cargando datos", err);
+              }
+            }
+
+            function renderDomainsTable() {
+              const tbody = document.getElementById('domainsTableBody');
+              tbody.innerHTML = '';
+              
+              if (globalData.domains.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" class="py-4 text-center text-gray-500">No hay clientes registrados.</td></tr>';
+                return;
+              }
+
+              globalData.domains.forEach(domain => {
+                const mailCount = globalData.accounts.filter(a => a.domain === domain).length;
+                tbody.innerHTML += '<tr class="hover:bg-gray-900/30 transition">' +
+                  '<td class="py-4 font-semibold text-gray-200">' + domain + '</td>' +
+                  '<td class="py-4 text-gray-400">' + mailCount + ' cuenta(s)</td>' +
+                  '<td class="py-4 text-right">' +
+                    '<button onclick="manageDomain(\'' + domain + '\')" class="text-xs bg-indigo-600/30 text-indigo-400 hover:bg-indigo-600 hover:text-white px-3 py-1.5 rounded-lg transition font-medium">⚙️ Administrar Cliente</button>' +
+                  '</td>' +
+                '</tr>';
+              });
+            }
+
+            function manageDomain(domain) {
+              currentDomain = domain;
+              document.getElementById('breadcrumbDomain').innerText = domain;
+              document.getElementById('domainSuffix').innerText = '@' + domain;
+              
+              document.getElementById('clientsView').classList.add('hidden');
+              document.getElementById('domainDetailView').classList.remove('hidden');
+              
+              renderDomainDetails();
+            }
+
+            function showClientsView() {
+              currentDomain = '';
+              document.getElementById('domainDetailView').classList.add('hidden');
+              document.getElementById('clientsView').classList.remove('hidden');
+              document.getElementById('editCard').classList.add('hidden');
+            }
+
+            function renderDomainDetails() {
+              // 1. Render Accounts
+              const accountsTable = document.getElementById('accountsTable');
+              accountsTable.innerHTML = '';
+              const filteredAccounts = globalData.accounts.filter(a => a.domain === currentDomain);
+              
+              if (filteredAccounts.length === 0) {
+                accountsTable.innerHTML = '<tr><td colspan="3" class="py-4 text-center text-gray-500">No hay cuentas creadas para este cliente aún.</td></tr>';
+              } else {
+                filteredAccounts.forEach(acc => {
+                  accountsTable.innerHTML += '<tr class="hover:bg-gray-900/30 transition">' +
+                    '<td class="py-3 font-medium text-gray-200">' + acc.email + '</td>' +
+                    '<td class="py-3 text-gray-400">' + acc.quota + '</td>' +
+                    '<td class="py-3 text-right space-x-1">' +
+                      '<button onclick="startSendInstructions(\'' + acc.email + '\')" class="text-xs bg-blue-600/30 text-blue-400 hover:bg-blue-600 hover:text-white px-2 py-1 rounded-lg transition" title="Enviar Instrucciones">Instrucciones</button>' +
+                      '<button onclick="startEdit(\'' + acc.email + '\', \'' + acc.quota + '\')" class="text-xs bg-indigo-600/30 text-indigo-400 hover:bg-indigo-600 hover:text-white px-2 py-1 rounded-lg transition">Editar</button>' +
+                      '<button onclick="startDelete(\'' + acc.email + '\')" class="text-xs bg-red-650/30 text-red-400 hover:bg-red-600 hover:text-white px-2 py-1 rounded-lg transition">Eliminar</button>' +
+                    '</td>' +
+                  '</tr>';
+                });
+              }
+
+              // 2. Render DNS Data
+              const dnsContainer = document.getElementById('dnsContainer');
+              dnsContainer.innerHTML = '';
+              const domainData = globalData.dnsData.find(d => d.domain === currentDomain);
+
+              if (domainData) {
+                dnsContainer.innerHTML = '<div class="p-6 bg-gray-900/40 border border-gray-800 rounded-xl space-y-4">' +
+                  '<h3 class="font-bold text-lg text-blue-400 flex justify-between items-center">' +
+                    '<span>DNS de ' + domainData.domain + '</span>' +
+                  '</h3>' +
+                  '<div class="overflow-x-auto">' +
+                    '<table class="w-full text-left text-xs">' +
+                      '<thead>' +
+                        '<tr class="border-b border-gray-800 text-gray-400 uppercase font-semibold">' +
+                          '<th class="pb-2">Tipo</th>' +
+                          '<th class="pb-2">Nombre / Host</th>' +
+                          '<th class="pb-2">Valor / Destino</th>' +
+                          '<th class="pb-2 text-right">Acciones</th>' +
+                        '</tr>' +
+                      '</thead>' +
+                      '<tbody class="divide-y divide-gray-850">' +
+                        '<tr class="hover:bg-gray-900/20 transition">' +
+                          '<td class="py-3"><span class="bg-blue-900/30 text-blue-400 px-2 py-0.5 rounded font-mono">A</span></td>' +
+                          '<td class="py-3 font-mono">mail</td>' +
+                          '<td class="py-3 font-mono text-gray-300">173.212.255.14</td>' +
+                          '<td class="py-3 text-right space-x-1 shrink-0">' +
+                            '<button onclick="copyText(\'mail\')" class="bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded text-[10px] transition">Copiar Host</button>' +
+                            '<button onclick="copyText(\'173.212.255.14\')" class="bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded text-[10px] transition">Copiar Valor</button>' +
+                          '</td>' +
+                        '</tr>' +
+                        '<tr class="hover:bg-gray-900/20 transition">' +
+                          '<td class="py-3"><span class="bg-green-900/30 text-green-400 px-2 py-0.5 rounded font-mono">MX</span></td>' +
+                          '<td class="py-3 font-mono">@</td>' +
+                          '<td class="py-3 font-mono text-gray-300">mail.arzzi.xyz (Prioridad 10)</td>' +
+                          '<td class="py-3 text-right space-x-1 shrink-0">' +
+                            '<button onclick="copyText(\'@\')" class="bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded text-[10px] transition">Copiar Host</button>' +
+                            '<button onclick="copyText(\'mail.arzzi.xyz\')" class="bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded text-[10px] transition">Copiar Valor</button>' +
+                          '</td>' +
+                        '</tr>' +
+                        '<tr class="hover:bg-gray-900/20 transition">' +
+                          '<td class="py-3"><span class="bg-purple-900/30 text-purple-400 px-2 py-0.5 rounded font-mono">TXT</span></td>' +
+                          '<td class="py-3 font-mono">@</td>' +
+                          '<td class="py-3 font-mono text-green-300 break-all">' + domainData.spf + '</td>' +
+                          '<td class="py-3 text-right space-x-1 shrink-0">' +
+                            '<button onclick="copyText(\'@\')" class="bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded text-[10px] transition">Copiar Host</button>' +
+                            '<button onclick="copyText(\'' + domainData.spf + '\')" class="bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded text-[10px] transition">Copiar Valor</button>' +
+                          '</td>' +
+                        '</tr>' +
+                        '<tr class="hover:bg-gray-900/20 transition">' +
+                          '<td class="py-3"><span class="bg-purple-900/30 text-purple-400 px-2 py-0.5 rounded font-mono">TXT</span></td>' +
+                          '<td class="py-3 font-mono">mail._domainkey</td>' +
+                          '<td class="py-3 font-mono text-purple-300 break-all select-all block max-h-16 overflow-y-auto">' + domainData.dkim + '</td>' +
+                          '<td class="py-3 text-right space-x-1 shrink-0">' +
+                            '<button onclick="copyText(\'mail._domainkey\')" class="bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded text-[10px] transition">Copiar Host</button>' +
+                            '<button onclick="copyText(\'' + domainData.dkim + '\')" class="bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded text-[10px] transition">Copiar Valor</button>' +
+                          '</td>' +
+                        '</tr>' +
+                        '<tr class="hover:bg-gray-900/20 transition">' +
+                          '<td class="py-3"><span class="bg-purple-900/30 text-purple-400 px-2 py-0.5 rounded font-mono">TXT</span></td>' +
+                          '<td class="py-3 font-mono">_dmarc</td>' +
+                          '<td class="py-3 font-mono text-indigo-300 break-all">' + domainData.dmarc + '</td>' +
+                          '<td class="py-3 text-right space-x-1 shrink-0">' +
+                            '<button onclick="copyText(\'_dmarc\')" class="bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded text-[10px] transition">Copiar Host</button>' +
+                            '<button onclick="copyText(\'' + domainData.dmarc + '\')" class="bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded text-[10px] transition">Copiar Valor</button>' +
+                          '</td>' +
+                        '</tr>' +
+                      '</tbody>' +
+                    '</table>' +
+                  '</div>' +
+                '</div>';
+              } else {
+                dnsContainer.innerHTML = '<p class="text-gray-500 text-sm">Cargando DNS...</p>';
               }
             }
 
@@ -648,7 +848,7 @@ services:
               alert('¡Copiado al portapapeles!');
             }
 
-             function togglePassword() {
+            function togglePassword() {
               const passInput = document.getElementById('password');
               const eyeIcon = document.getElementById('eyeIcon');
               if (passInput.type === 'password') {
@@ -738,6 +938,7 @@ services:
               emailForInstructions = email;
               document.getElementById('instructionsEmail').value = email;
               document.getElementById('instructionsTargetEmail').value = '';
+              document.getElementById('instructionsTempPassword').value = '';
               document.getElementById('instructionsModal').classList.remove('hidden');
               document.getElementById('instructionsModalStatus').classList.add('hidden');
             }
@@ -748,6 +949,7 @@ services:
 
             async function confirmSendInstructions() {
               const target = document.getElementById('instructionsTargetEmail').value;
+              const tempPassword = document.getElementById('instructionsTempPassword').value;
               if (!target) {
                 alert('Por favor escribe un correo destinatario.');
                 return;
@@ -764,7 +966,7 @@ services:
                 const res = await fetch('/api/accounts/send-instructions', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ email: emailForInstructions, targetEmail: target })
+                  body: JSON.stringify({ email: emailForInstructions, targetEmail: target, tempPassword })
                 });
                 const r = await res.json();
                 if (res.ok && r.success) {
@@ -786,9 +988,49 @@ services:
               }
             }
 
+            // Registrar nuevo cliente (Dominio)
+            document.getElementById('createDomainForm').addEventListener('submit', async (e) => {
+              e.preventDefault();
+              const domain = document.getElementById('newDomainName').value;
+              const btn = document.getElementById('createDomainBtn');
+              const status = document.getElementById('createDomainStatus');
+
+              btn.disabled = true;
+              btn.innerText = 'Registrando...';
+              status.className = 'mt-4 text-center text-sm text-blue-400';
+              status.innerText = 'Registrando cliente en la base de datos...';
+              status.classList.remove('hidden');
+
+              try {
+                const res = await fetch('/api/domains', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ domain })
+                });
+                const r = await res.json();
+                if (res.ok && r.success) {
+                  status.className = 'mt-4 text-center text-sm text-green-400';
+                  status.innerText = '¡Cliente registrado con éxito!';
+                  document.getElementById('newDomainName').value = '';
+                  await loadData();
+                } else {
+                  status.className = 'mt-4 text-center text-sm text-red-400';
+                  status.innerText = 'Error: ' + r.error;
+                }
+              } catch (err) {
+                status.className = 'mt-4 text-center text-sm text-red-400';
+                status.innerText = 'Error de conexión.';
+              } finally {
+                btn.disabled = false;
+                btn.innerText = 'Registrar Cliente';
+              }
+            });
+
+            // Crear Cuenta de Correo (Dentro del cliente)
             document.getElementById('createForm').addEventListener('submit', async (e) => {
               e.preventDefault();
-              const email = document.getElementById('email').value;
+              const prefix = document.getElementById('emailPrefix').value;
+              const email = prefix + '@' + currentDomain;
               const password = document.getElementById('password').value;
               const quota = document.getElementById('quota').value;
               const btn = document.getElementById('submitBtn');
@@ -810,7 +1052,7 @@ services:
                 if (res.ok && r.success) {
                   statusMsg.className = 'mt-4 text-center text-sm text-green-400';
                   statusMsg.innerText = '¡Cuenta de correo y DKIM generados correctamente!';
-                  document.getElementById('email').value = '';
+                  document.getElementById('emailPrefix').value = '';
                   document.getElementById('password').value = '';
                   await loadData();
                 } else {
@@ -864,7 +1106,7 @@ services:
                 statusMsg.innerText = 'Error de conexión con el servidor.';
               } finally {
                 btn.disabled = false;
-                btn.innerText = 'Guardar Cambios';
+                btn.innerText = 'Guardar';
               }
             });
 
@@ -907,6 +1149,10 @@ services:
                 <div>
                   <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Correo destinatario</label>
                   <input type="email" id="instructionsTargetEmail" placeholder="correo-alternativo@cliente.com" class="w-full px-4 py-3 bg-gray-900 border border-gray-850 rounded-xl focus:border-indigo-500 focus:outline-none transition text-sm text-gray-200">
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Contraseña Temporal / Inicial (Opcional)</label>
+                  <input type="text" id="instructionsTempPassword" placeholder="Dejar vacío si ya la conocen" class="w-full px-4 py-3 bg-gray-900 border border-gray-850 rounded-xl focus:border-indigo-500 focus:outline-none transition text-sm text-gray-200 font-mono">
                 </div>
               </div>
               <div class="flex gap-3 justify-end mt-6">
