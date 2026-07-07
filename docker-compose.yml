@@ -102,7 +102,15 @@ services:
               res.on('data', chunk => data += chunk);
               res.on('end', () => {
                 if (res.statusCode >= 200 && res.statusCode < 300) {
-                  resolve(data ? JSON.parse(data) : null);
+                  if (data) {
+                    try {
+                      resolve(JSON.parse(data));
+                    } catch (e) {
+                      resolve(data);
+                    }
+                  } else {
+                    resolve(null);
+                  }
                 } else {
                   reject(new Error('Docker API ' + res.statusCode + ': ' + data));
                 }
