@@ -94,7 +94,7 @@ services:
         const DOCKER_SOCKET = '/var/run/docker.sock';
         const CONFIG_DIR = '/config';
 
-        const TOTP_SECRET = 'ARZZIWEBMAILMANAGERSECRET';
+        const TOTP_SECRET = 'ARZZIWEBMAILMANAGERSECRETAUTH';
         const SESSION_TOKEN = 'ARZZI_SESSION_SECURE_TOKEN_2026';
 
         app.use(express.json());
@@ -557,7 +557,7 @@ services:
                     <li>Abre tu app Google Authenticator en el celular.</li>
                     <li>Agrega cuenta con **Ingresar clave de configuración**.</li>
                     <li>Nombre: <strong class="text-gray-300">DMS Manager</strong></li>
-                    <li>Clave: <strong class="text-indigo-400 font-mono">ARZZIWEBMAILMANAGERSECRET</strong></li>
+                    <li>Clave: <strong class="text-indigo-400 font-mono">ARZZIWEBMAILMANAGERSECRETAUTH</strong></li>
                   </ol>
                 </div>
               </div>
