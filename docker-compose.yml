@@ -41,6 +41,8 @@ services:
       - ROUNDCUBEMAIL_DEFAULT_PORT=143
       - ROUNDCUBEMAIL_SMTP_SERVER=mailserver
       - ROUNDCUBEMAIL_SMTP_PORT=25
+      - ROUNDCUBEMAIL_SMTP_USER=
+      - ROUNDCUBEMAIL_SMTP_PASS=
     depends_on:
       - mailserver
     networks:
