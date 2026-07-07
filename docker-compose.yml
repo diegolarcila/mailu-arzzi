@@ -296,6 +296,7 @@ services:
               dnsData: Object.entries(dnsData).map(([domain, records]) => ({ domain, ...records })) 
             });
           } catch (err) {
+            console.error("Error in GET /api/data:", err);
             res.status(500).json({ error: err.message });
           }
         });
@@ -765,25 +766,31 @@ services:
                   return;
                 }
 
-                document.getElementById('loginView').classList.add('hidden');
+                 const data = await res.json();
+                 if (!res.ok) {
+                   alert('Error del servidor al cargar datos: ' + (data.error || 'Desconocido'));
+                   return;
+                 }
 
-                if (currentDomain) {
-                  document.getElementById('domainDetailView').classList.remove('hidden');
-                  document.getElementById('clientsView').classList.add('hidden');
-                } else {
-                  document.getElementById('clientsView').classList.remove('hidden');
-                  document.getElementById('domainDetailView').classList.add('hidden');
-                }
+                 globalData = data;
+                 document.getElementById('loginView').classList.add('hidden');
 
-                globalData = await res.json();
-                
-                renderDomainsTable();
-                if (currentDomain) {
-                  renderDomainDetails();
-                }
-              } catch (err) {
-                console.error("Error cargando datos", err);
-              }
+                 if (currentDomain) {
+                   document.getElementById('domainDetailView').classList.remove('hidden');
+                   document.getElementById('clientsView').classList.add('hidden');
+                 } else {
+                   document.getElementById('clientsView').classList.remove('hidden');
+                   document.getElementById('domainDetailView').classList.add('hidden');
+                 }
+
+                 renderDomainsTable();
+                 if (currentDomain) {
+                   renderDomainDetails();
+                 }
+               } catch (err) {
+                 console.error("Error cargando datos", err);
+                 alert("Error de conexión al cargar datos: " + err.message);
+               }
             }
 
             function renderDomainsTable() {
