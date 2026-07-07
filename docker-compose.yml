@@ -193,11 +193,14 @@ services:
         });
 
         app.post('/api/accounts', async (req, res) => {
-          const { email, password } = req.body;
+          const { email, password, quota } = req.body;
           if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
 
           try {
             await execInMailserver(['email', 'add', email, password]);
+            if (quota) {
+              await execInMailserver(['quota', 'set', email, quota]);
+            }
             await execInMailserver(['config', 'dkim']);
             res.json({ success: true });
           } catch (err) {
@@ -259,7 +262,24 @@ services:
                     </div>
                     <div>
                       <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Contraseña</label>
-                      <input type="password" id="password" required placeholder="••••••••" class="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-xl focus:border-indigo-500 focus:outline-none transition text-sm text-gray-200">
+                      <div class="relative">
+                        <input type="password" id="password" required placeholder="••••••••" class="w-full pl-4 pr-12 py-3 bg-gray-900 border border-gray-800 rounded-xl focus:border-indigo-500 focus:outline-none transition text-sm text-gray-200">
+                        <button type="button" onclick="togglePassword()" class="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-indigo-400 transition">
+                          <span id="eyeIcon">👁️</span>
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Límite de Almacenamiento (Cuota)</label>
+                      <select id="quota" class="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-xl focus:border-indigo-500 focus:outline-none transition text-sm text-gray-200">
+                        <option value="">Ilimitado</option>
+                        <option value="250M">250 MB</option>
+                        <option value="500M">500 MB</option>
+                        <option value="1G" selected>1 GB</option>
+                        <option value="2G">2 GB</option>
+                        <option value="5G">5 GB</option>
+                        <option value="10G">10 GB</option>
+                      </select>
                     </div>
                     <button type="submit" id="submitBtn" class="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 transition rounded-xl font-medium text-sm shadow-lg shadow-indigo-900/40">
                       Crear Cuenta y Registrar DNS
@@ -365,10 +385,23 @@ services:
               alert('¡Copiado al portapapeles!');
             }
 
+            function togglePassword() {
+              const passInput = document.getElementById('password');
+              const eyeIcon = document.getElementById('eyeIcon');
+              if (passInput.type === 'password') {
+                passInput.type = 'text';
+                eyeIcon.innerText = '🔒';
+              } else {
+                passInput.type = 'password';
+                eyeIcon.innerText = '👁️';
+              }
+            }
+
             document.getElementById('createForm').addEventListener('submit', async (e) => {
               e.preventDefault();
               const email = document.getElementById('email').value;
               const password = document.getElementById('password').value;
+              const quota = document.getElementById('quota').value;
               const btn = document.getElementById('submitBtn');
               const statusMsg = document.getElementById('statusMsg');
 
@@ -382,10 +415,10 @@ services:
                 const res = await fetch('/api/accounts', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ email, password })
+                  body: JSON.stringify({ email, password, quota })
                 });
                 const r = await res.json();
-                if (r.success) {
+                if (res.ok && r.success) {
                   statusMsg.className = 'mt-4 text-center text-sm text-green-400';
                   statusMsg.innerText = '¡Cuenta de correo y DKIM generados correctamente!';
                   document.getElementById('email').value = '';
