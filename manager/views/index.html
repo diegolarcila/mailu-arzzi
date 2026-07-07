@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DMS Manager — Panel de Control</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Outfit', sans-serif;
+      background: radial-gradient(circle at top right, #111827, #030712);
+      color: #f3f4f6;
+    }
+    .glass {
+      background: rgba(17, 24, 39, 0.7);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+  </style>
+</head>
+<body class="min-h-screen p-6 md:p-12">
+  <div class="max-w-6xl mx-auto">
+    <!-- Header -->
+    <header class="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 gap-4">
+      <div>
+        <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-500">
+          DMS Manager
+        </h1>
+        <p class="text-gray-400 mt-1">Administración de clientes y configuración DNS automática</p>
+      </div>
+      <div class="flex gap-3">
+        <a href="/webmail" target="_blank" class="px-5 py-2.5 rounded-xl glass hover:bg-gray-800 transition text-sm font-medium flex items-center gap-2">
+          🌐 Ir a Webmail
+        </a>
+      </div>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <!-- Create Account Form -->
+      <div class="lg:col-span-1">
+        <div class="glass p-6 rounded-2xl shadow-xl">
+          <h2 class="text-xl font-semibold mb-6 flex items-center gap-2 text-indigo-400">
+            ✉️ Crear Cuenta de Correo
+          </h2>
+          <form id="createForm" class="space-y-4">
+            <div>
+              <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Correo Completo</label>
+              <input type="email" id="email" required placeholder="contacto@cliente.com" class="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-xl focus:border-indigo-500 focus:outline-none transition text-sm text-gray-200">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Contraseña</label>
+              <input type="password" id="password" required placeholder="••••••••" class="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-xl focus:border-indigo-500 focus:outline-none transition text-sm text-gray-200">
+            </div>
+            <button type="submit" id="submitBtn" class="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 transition rounded-xl font-medium text-sm shadow-lg shadow-indigo-900/40">
+              Crear Cuenta y Registrar DNS
+            </button>
+          </form>
+          <div id="statusMsg" class="mt-4 text-center text-sm hidden"></div>
+        </div>
+      </div>
+
+      <!-- Accounts & DNS Configuration -->
+      <div class="lg:col-span-2 space-y-8">
+        <!-- Accounts List -->
+        <div class="glass p-6 rounded-2xl shadow-xl">
+          <h2 class="text-xl font-semibold mb-6 text-indigo-400">👥 Cuentas de Correo Activas</h2>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left">
+              <thead>
+                <tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wider">
+                  <th class="pb-3 font-semibold">Dirección de Correo</th>
+                  <th class="pb-3 font-semibold">Dominio</th>
+                </tr>
+              </thead>
+              <tbody id="accountsTable" class="divide-y divide-gray-900 text-sm text-gray-300">
+                <!-- Dynamic load -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- DNS Records -->
+        <div class="glass p-6 rounded-2xl shadow-xl">
+          <h2 class="text-xl font-semibold mb-6 text-indigo-400">⚙️ Configuración DNS por Dominio</h2>
+          <div id="dnsContainer" class="space-y-6">
+            <!-- Dynamic DNS details -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    async function loadData() {
+      try {
+        const res = await fetch('/api/data');
+        const data = await res.json();
+
+        // Accounts Table
+        const accountsTable = document.getElementById('accountsTable');
+        accountsTable.innerHTML = '';
+        if (data.accounts.length === 0) {
+          accountsTable.innerHTML = `<tr><td colspan="2" class="py-4 text-center text-gray-500">No hay cuentas creadas aún.</td></tr>`;
+        } else {
+          data.accounts.forEach(acc => {
+            accountsTable.innerHTML += `
+              <tr class="hover:bg-gray-900/30 transition">
+                <td class="py-3 font-medium">${acc.email}</td>
+                <td class="py-3 text-gray-400">${acc.domain}</td>
+              </tr>
+            `;
+          });
+        }
+
+        // DNS Configuration Container
+        const dnsContainer = document.getElementById('dnsContainer');
+        dnsContainer.innerHTML = '';
+        if (data.dnsData.length === 0) {
+          dnsContainer.innerHTML = `<p class="text-gray-500 text-sm">Crea una cuenta para ver la información DNS de su dominio.</p>`;
+        } else {
+          data.dnsData.forEach(domainData => {
+            dnsContainer.innerHTML += `
+              <div class="p-5 bg-gray-900/40 border border-gray-800 rounded-xl space-y-4">
+                <h3 class="font-bold text-lg text-blue-400 flex justify-between items-center">
+                  <span>${domainData.domain}</span>
+                  <span class="text-xs font-normal text-gray-400">DNS Config</span>
+                </h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <!-- MX -->
+                  <div class="p-3 bg-gray-900 rounded-lg border border-gray-800/80">
+                    <span class="text-xs font-semibold text-gray-400">MX (Servidor de Correo)</span>
+                    <div class="flex justify-between items-center mt-1">
+                      <code class="text-xs text-blue-300">mail.arzzi.xyz</code>
+                      <button onclick="copyText('mail.arzzi.xyz')" class="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded transition">Copiar</button>
+                    </div>
+                  </div>
+                  <!-- SPF -->
+                  <div class="p-3 bg-gray-900 rounded-lg border border-gray-800/80">
+                    <span class="text-xs font-semibold text-gray-400">TXT (SPF - Entregabilidad)</span>
+                    <div class="flex justify-between items-center mt-1">
+                      <code class="text-xs text-green-300">${domainData.spf}</code>
+                      <button onclick="copyText('${domainData.spf}')" class="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded transition">Copiar</button>
+                    </div>
+                  </div>
+                  <!-- DKIM -->
+                  <div class="p-3 bg-gray-900 rounded-lg border border-gray-800/80 md:col-span-2">
+                    <span class="text-xs font-semibold text-gray-400">TXT (mail._domainkey - Firma DKIM)</span>
+                    <div class="flex justify-between items-start gap-4 mt-1">
+                      <code class="text-xs text-purple-300 break-all select-all block max-h-24 overflow-y-auto">${domainData.dkim}</code>
+                      <button onclick="copyText('${domainData.dkim}')" class="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded transition shrink-0">Copiar</button>
+                    </div>
+                  </div>
+                  <!-- DMARC -->
+                  <div class="p-3 bg-gray-900 rounded-lg border border-gray-800/80 md:col-span-2">
+                    <span class="text-xs font-semibold text-gray-400">TXT (_dmarc - Seguridad)</span>
+                    <div class="flex justify-between items-center mt-1">
+                      <code class="text-xs text-indigo-300">${domainData.dmarc}</code>
+                      <button onclick="copyText('${domainData.dmarc}')" class="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded transition">Copiar</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            `;
+          });
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    function copyText(txt) {
+      navigator.clipboard.writeText(txt);
+      alert('¡Copiado al portapapeles!');
+    }
+
+    document.getElementById('createForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      const btn = document.getElementById('submitBtn');
+      const statusMsg = document.getElementById('statusMsg');
+
+      btn.disabled = true;
+      btn.innerText = 'Creando y Configurando...';
+      statusMsg.className = 'mt-4 text-center text-sm text-blue-400';
+      statusMsg.innerText = 'Creando correo y generando claves de seguridad DKIM...';
+      statusMsg.classList.remove('hidden');
+
+      try {
+        const res = await fetch('/api/accounts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const r = await res.json();
+        if (r.success) {
+          statusMsg.className = 'mt-4 text-center text-sm text-green-400';
+          statusMsg.innerText = '¡Cuenta de correo y DKIM generados correctamente!';
+          document.getElementById('email').value = '';
+          document.getElementById('password').value = '';
+          await loadData();
+        } else {
+          statusMsg.className = 'mt-4 text-center text-sm text-red-400';
+          statusMsg.innerText = 'Error: ' + r.error;
+        }
+      } catch (err) {
+        statusMsg.className = 'mt-4 text-center text-sm text-red-400';
+        statusMsg.innerText = 'Error de conexión con el servidor.';
+      } finally {
+        btn.disabled = false;
+        btn.innerText = 'Crear Cuenta y Registrar DNS';
+      }
+    });
+
+    loadData();
+  </script>
+</body>
+</html>

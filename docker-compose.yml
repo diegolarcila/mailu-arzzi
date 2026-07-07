@@ -44,6 +44,22 @@ services:
     networks:
       - default
 
+  manager:
+    build:
+      context: ./manager
+      dockerfile: Dockerfile
+    container_name: manager-j7vrlerr67hcw5p67o3b5dh4
+    restart: always
+    ports:
+      - "0.0.0.0:3000:3000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/mail-data/config/:/config
+    depends_on:
+      - mailserver
+    networks:
+      - default
+
 networks:
   default:
     driver: bridge
