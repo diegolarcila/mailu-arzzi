@@ -102,7 +102,7 @@ services:
                 if (res.statusCode >= 200 && res.statusCode < 300) {
                   resolve(data ? JSON.parse(data) : null);
                 } else {
-                  reject(new Error(`Docker API ${res.statusCode}: ${data}`));
+                  reject(new Error('Docker API ' + res.statusCode + ': ' + data));
                 }
               });
             });
@@ -131,13 +131,13 @@ services:
           const containerId = await getMailserverContainerId();
           if (!containerId) throw new Error('Mailserver container is offline.');
 
-          const execSetup = await dockerRequest('POST', `/containers/${containerId}/exec`, {
+          const execSetup = await dockerRequest('POST', '/containers/' + containerId + '/exec', {
             AttachStdout: true,
             AttachStderr: true,
             Cmd: ['setup', ...args]
           });
 
-          const output = await dockerRequest('POST', `/exec/${execSetup.Id}/start`, {
+          const output = await dockerRequest('POST', '/exec/' + execSetup.Id + '/start', {
             Detach: false,
             Tty: false
           });
@@ -165,7 +165,7 @@ services:
             const dnsData = {};
             for (const domain of domains) {
               let dkim = 'DNSSEC/DKIM keys not generated yet. Add email account to generate.';
-              const dkimPath = path.join(CONFIG_DIR, `opendkim/keys/${domain}/mail.txt`);
+              const dkimPath = path.join(CONFIG_DIR, 'opendkim/keys/' + domain + '/mail.txt');
               if (fs.existsSync(dkimPath)) {
                 const dkimRaw = fs.readFileSync(dkimPath, 'utf8');
                 const match = dkimRaw.match(/\(([^)]+)\)/);
@@ -177,10 +177,10 @@ services:
               }
 
               dnsData[domain] = {
-                mx: `mail.arzzi.xyz (Priority: 10)`,
-                spf: `v=spf1 mx ip4:173.212.255.14 ~all`,
+                mx: 'mail.arzzi.xyz (Priority: 10)',
+                spf: 'v=spf1 mx ip4:173.212.255.14 ~all',
                 dkim: dkim,
-                dmarc: `v=DMARC1; p=none; pct=100; rua=mailto:postmaster@${domain}`
+                dmarc: 'v=DMARC1; p=none; pct=100; rua=mailto:postmaster@' + domain
               };
             }
 
@@ -208,7 +208,7 @@ services:
         });
 
         app.listen(PORT, () => {
-          console.log(`DMS Manager running on port ${PORT}`);
+          console.log('DMS Manager running on port ' + PORT);
         });
         EOF
         cat << 'EOF' > /app/views/index.html
@@ -307,8 +307,8 @@ services:
                   data.accounts.forEach(acc => {
                     accountsTable.innerHTML += `
                       <tr class="hover:bg-gray-900/30 transition">
-                        <td class="py-3 font-medium">${acc.email}</td>
-                        <td class="py-3 text-gray-400">${acc.domain}</td>
+                        <td class="py-3 font-medium">\$\${acc.email}</td>
+                        <td class="py-3 text-gray-400">\$\${acc.domain}</td>
                       </tr>
                     `;
                   });
@@ -323,7 +323,7 @@ services:
                     dnsContainer.innerHTML += `
                       <div class="p-5 bg-gray-900/40 border border-gray-800 rounded-xl space-y-4">
                         <h3 class="font-bold text-lg text-blue-400 flex justify-between items-center">
-                          <span>${domainData.domain}</span>
+                          <span>\$\${domainData.domain}</span>
                           <span class="text-xs font-normal text-gray-400">DNS Config</span>
                         </h3>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -337,22 +337,22 @@ services:
                           <div class="p-3 bg-gray-900 rounded-lg border border-gray-800/80">
                             <span class="text-xs font-semibold text-gray-400">TXT (SPF - Entregabilidad)</span>
                             <div class="flex justify-between items-center mt-1">
-                              <code class="text-xs text-green-300">\${domainData.spf}</code>
-                              <button onclick="copyText('\${domainData.spf}')" class="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded transition">Copiar</button>
+                              <code class="text-xs text-green-300">\$\${domainData.spf}</code>
+                              <button onclick="copyText('\$\${domainData.spf}')" class="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded transition">Copiar</button>
                             </div>
                           </div>
                           <div class="p-3 bg-gray-900 rounded-lg border border-gray-800/80 md:col-span-2">
                             <span class="text-xs font-semibold text-gray-400">TXT (mail._domainkey - Firma DKIM)</span>
                             <div class="flex justify-between items-start gap-4 mt-1">
-                              <code class="text-xs text-purple-300 break-all select-all block max-h-24 overflow-y-auto">\${domainData.dkim}</code>
-                              <button onclick="copyText('\${domainData.dkim}')" class="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded transition shrink-0">Copiar</button>
+                              <code class="text-xs text-purple-300 break-all select-all block max-h-24 overflow-y-auto">\$\${domainData.dkim}</code>
+                              <button onclick="copyText('\$\${domainData.dkim}')" class="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded transition shrink-0">Copiar</button>
                             </div>
                           </div>
                           <div class="p-3 bg-gray-900 rounded-lg border border-gray-800/80 md:col-span-2">
                             <span class="text-xs font-semibold text-gray-400">TXT (_dmarc - Seguridad)</span>
                             <div class="flex justify-between items-center mt-1">
-                              <code class="text-xs text-indigo-300">\${domainData.dmarc}</code>
-                              <button onclick="copyText('\${domainData.dmarc}')" class="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded transition">Copiar</button>
+                              <code class="text-xs text-indigo-300">\$\${domainData.dmarc}</code>
+                              <button onclick="copyText('\$\${domainData.dmarc}')" class="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded transition">Copiar</button>
                             </div>
                           </div>
                         </div>
