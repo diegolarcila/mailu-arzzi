@@ -922,3 +922,6 @@ services:
           </div>
         </body>
         </html>
+        EOF
+        npm install --only=production
+        node server.js
