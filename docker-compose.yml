@@ -302,62 +302,55 @@ services:
                 const accountsTable = document.getElementById('accountsTable');
                 accountsTable.innerHTML = '';
                 if (data.accounts.length === 0) {
-                  accountsTable.innerHTML = `<tr><td colspan="2" class="py-4 text-center text-gray-500">No hay cuentas creadas aún.</td></tr>`;
+                  accountsTable.innerHTML = '<tr><td colspan="2" class="py-4 text-center text-gray-500">No hay cuentas creadas aún.</td></tr>';
                 } else {
                   data.accounts.forEach(acc => {
-                    accountsTable.innerHTML += `
-                      <tr class="hover:bg-gray-900/30 transition">
-                        <td class="py-3 font-medium">\$\${acc.email}</td>
-                        <td class="py-3 text-gray-400">\$\${acc.domain}</td>
-                      </tr>
-                    `;
+                    accountsTable.innerHTML += '<tr class="hover:bg-gray-900/30 transition"><td class="py-3 font-medium">' + acc.email + '</td><td class="py-3 text-gray-400">' + acc.domain + '</td></tr>';
                   });
                 }
 
                 const dnsContainer = document.getElementById('dnsContainer');
                 dnsContainer.innerHTML = '';
                 if (data.dnsData.length === 0) {
-                  dnsContainer.innerHTML = `<p class="text-gray-500 text-sm">Crea una cuenta para ver la información DNS de su dominio.</p>`;
+                  dnsContainer.innerHTML = '<p class="text-gray-500 text-sm">Crea una cuenta para ver la información DNS de su dominio.</p>';
                 } else {
                   data.dnsData.forEach(domainData => {
-                    dnsContainer.innerHTML += `
-                      <div class="p-5 bg-gray-900/40 border border-gray-800 rounded-xl space-y-4">
-                        <h3 class="font-bold text-lg text-blue-400 flex justify-between items-center">
-                          <span>\$\${domainData.domain}</span>
-                          <span class="text-xs font-normal text-gray-400">DNS Config</span>
-                        </h3>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div class="p-3 bg-gray-900 rounded-lg border border-gray-800/80">
-                            <span class="text-xs font-semibold text-gray-400">MX (Servidor de Correo)</span>
-                            <div class="flex justify-between items-center mt-1">
-                              <code class="text-xs text-blue-300">mail.arzzi.xyz</code>
-                              <button onclick="copyText('mail.arzzi.xyz')" class="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded transition">Copiar</button>
-                            </div>
-                          </div>
-                          <div class="p-3 bg-gray-900 rounded-lg border border-gray-800/80">
-                            <span class="text-xs font-semibold text-gray-400">TXT (SPF - Entregabilidad)</span>
-                            <div class="flex justify-between items-center mt-1">
-                              <code class="text-xs text-green-300">\$\${domainData.spf}</code>
-                              <button onclick="copyText('\$\${domainData.spf}')" class="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded transition">Copiar</button>
-                            </div>
-                          </div>
-                          <div class="p-3 bg-gray-900 rounded-lg border border-gray-800/80 md:col-span-2">
-                            <span class="text-xs font-semibold text-gray-400">TXT (mail._domainkey - Firma DKIM)</span>
-                            <div class="flex justify-between items-start gap-4 mt-1">
-                              <code class="text-xs text-purple-300 break-all select-all block max-h-24 overflow-y-auto">\$\${domainData.dkim}</code>
-                              <button onclick="copyText('\$\${domainData.dkim}')" class="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded transition shrink-0">Copiar</button>
-                            </div>
-                          </div>
-                          <div class="p-3 bg-gray-900 rounded-lg border border-gray-800/80 md:col-span-2">
-                            <span class="text-xs font-semibold text-gray-400">TXT (_dmarc - Seguridad)</span>
-                            <div class="flex justify-between items-center mt-1">
-                              <code class="text-xs text-indigo-300">\$\${domainData.dmarc}</code>
-                              <button onclick="copyText('\$\${domainData.dmarc}')" class="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded transition">Copiar</button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    `;
+                    dnsContainer.innerHTML += '<div class="p-5 bg-gray-900/40 border border-gray-800 rounded-xl space-y-4">' +
+                      '<h3 class="font-bold text-lg text-blue-400 flex justify-between items-center">' +
+                        '<span>' + domainData.domain + '</span>' +
+                        '<span class="text-xs font-normal text-gray-400">DNS Config</span>' +
+                      '</h3>' +
+                      '<div class="grid grid-cols-1 md:grid-cols-2 gap-4">' +
+                        '<div class="p-3 bg-gray-900 rounded-lg border border-gray-800/80">' +
+                          '<span class="text-xs font-semibold text-gray-400">MX (Servidor de Correo)</span>' +
+                          '<div class="flex justify-between items-center mt-1">' +
+                            '<code class="text-xs text-blue-300">mail.arzzi.xyz</code>' +
+                            '<button onclick="copyText(\'mail.arzzi.xyz\')" class="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded transition">Copiar</button>' +
+                          '</div>' +
+                        '</div>' +
+                        '<div class="p-3 bg-gray-900 rounded-lg border border-gray-800/80">' +
+                          '<span class="text-xs font-semibold text-gray-400">TXT (SPF - Entregabilidad)</span>' +
+                          '<div class="flex justify-between items-center mt-1">' +
+                            '<code class="text-xs text-green-300">' + domainData.spf + '</code>' +
+                            '<button onclick="copyText(\'' + domainData.spf + '\')" class="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded transition">Copiar</button>' +
+                          '</div>' +
+                        '</div>' +
+                        '<div class="p-3 bg-gray-900 rounded-lg border border-gray-800/80 md:col-span-2">' +
+                          '<span class="text-xs font-semibold text-gray-400">TXT (mail._domainkey - Firma DKIM)</span>' +
+                          '<div class="flex justify-between items-start gap-4 mt-1">' +
+                            '<code class="text-xs text-purple-300 break-all select-all block max-h-24 overflow-y-auto">' + domainData.dkim + '</code>' +
+                            '<button onclick="copyText(\'' + domainData.dkim + '\')" class="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded transition shrink-0">Copiar</button>' +
+                          '</div>' +
+                        '</div>' +
+                        '<div class="p-3 bg-gray-900 rounded-lg border border-gray-800/80 md:col-span-2">' +
+                          '<span class="text-xs font-semibold text-gray-400">TXT (_dmarc - Seguridad)</span>' +
+                          '<div class="flex justify-between items-center mt-1">' +
+                            '<code class="text-xs text-indigo-300">' + domainData.dmarc + '</code>' +
+                            '<button onclick="copyText(\'' + domainData.dmarc + '\')" class="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded transition">Copiar</button>' +
+                          '</div>' +
+                        '</div>' +
+                      '</div>' +
+                    '</div>';
                   });
                 }
               } catch (err) {
