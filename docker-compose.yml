@@ -157,8 +157,20 @@ services:
         app.get('/api/data', async (req, res) => {
           try {
             const accountsPath = path.join(CONFIG_DIR, 'postfix-accounts.cf');
+            const quotasPath = path.join(CONFIG_DIR, 'dovecot-quotas.cf');
             let accounts = [];
             let domains = new Set();
+            const quotas = {};
+
+            if (fs.existsSync(quotasPath)) {
+              const content = fs.readFileSync(quotasPath, 'utf8');
+              content.split('\n').forEach(line => {
+                if (line.includes(':')) {
+                  const [email, q] = line.split(':');
+                  quotas[email.trim()] = q.trim();
+                }
+              });
+            }
 
             if (fs.existsSync(accountsPath)) {
               const content = fs.readFileSync(accountsPath, 'utf8');
@@ -168,7 +180,7 @@ services:
                   const [email] = line.split('|');
                   const domain = email.split('@')[1];
                   domains.add(domain);
-                  return { email, domain };
+                  return { email, domain, quota: quotas[email] || 'Ilimitado' };
                 });
             }
 
@@ -210,6 +222,29 @@ services:
               await execInMailserver(['quota', 'set', email, quota]);
             }
             await execInMailserver(['config', 'dkim']);
+            res.json({ success: true });
+          } catch (err) {
+            res.status(500).json({ error: err.message });
+          }
+        });
+
+        app.post('/api/accounts/update', async (req, res) => {
+          const { email, password, quota } = req.body;
+          if (!email) return res.status(400).json({ error: 'Email is required' });
+
+          try {
+            if (password) {
+              await execInMailserver(['email', 'update', email, password]);
+            }
+            if (quota !== undefined) {
+              if (quota) {
+                await execInMailserver(['quota', 'set', email, quota]);
+              } else {
+                try {
+                  await execInMailserver(['quota', 'set', email, '0']);
+                } catch (e) {}
+              }
+            }
             res.json({ success: true });
           } catch (err) {
             res.status(500).json({ error: err.message });
@@ -295,6 +330,49 @@ services:
                   </form>
                   <div id="statusMsg" class="mt-4 text-center text-sm hidden"></div>
                 </div>
+
+                <!-- Card Editar Cuenta (Oculto por defecto) -->
+                <div id="editCard" class="glass p-6 rounded-2xl shadow-xl mt-8 hidden">
+                  <h2 class="text-xl font-semibold mb-6 flex items-center gap-2 text-indigo-400">
+                    ✏️ Editar Cuenta de Correo
+                  </h2>
+                  <form id="editForm" class="space-y-4">
+                    <div>
+                      <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Correo</label>
+                      <input type="email" id="editEmail" readonly class="w-full px-4 py-3 bg-gray-950 border border-gray-900 rounded-xl focus:outline-none text-sm text-gray-400 cursor-not-allowed">
+                    </div>
+                    <div>
+                      <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Nueva Contraseña</label>
+                      <div class="relative">
+                        <input type="password" id="editPassword" placeholder="Dejar en blanco para mantener" class="w-full pl-4 pr-12 py-3 bg-gray-900 border border-gray-800 rounded-xl focus:border-indigo-500 focus:outline-none transition text-sm text-gray-200">
+                        <button type="button" onclick="toggleEditPassword()" class="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-indigo-400 transition">
+                          <span id="editEyeIcon">👁️</span>
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Límite de Almacenamiento (Cuota)</label>
+                      <select id="editQuota" class="w-full px-4 py-3 bg-gray-900 border border-gray-800 rounded-xl focus:border-indigo-500 focus:outline-none transition text-sm text-gray-200">
+                        <option value="">Ilimitado</option>
+                        <option value="250M">250 MB</option>
+                        <option value="500M">500 MB</option>
+                        <option value="1G">1 GB</option>
+                        <option value="2G">2 GB</option>
+                        <option value="5G">5 GB</option>
+                        <option value="10G">10 GB</option>
+                      </select>
+                    </div>
+                    <div class="flex gap-2">
+                      <button type="submit" id="editSubmitBtn" class="flex-1 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 transition rounded-xl font-medium text-sm shadow-lg shadow-indigo-900/40">
+                        Guardar Cambios
+                      </button>
+                      <button type="button" onclick="cancelEdit()" class="px-4 py-3 bg-gray-800 hover:bg-gray-700 transition rounded-xl font-medium text-sm">
+                        Cancelar
+                      </button>
+                    </div>
+                  </form>
+                  <div id="editStatusMsg" class="mt-4 text-center text-sm hidden"></div>
+                </div>
               </div>
 
               <div class="lg:col-span-2 space-y-8">
@@ -306,6 +384,8 @@ services:
                         <tr class="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wider">
                           <th class="pb-3 font-semibold">Dirección de Correo</th>
                           <th class="pb-3 font-semibold">Dominio</th>
+                          <th class="pb-3 font-semibold">Cuota</th>
+                          <th class="pb-3 font-semibold text-right">Acciones</th>
                         </tr>
                       </thead>
                       <tbody id="accountsTable" class="divide-y divide-gray-900 text-sm text-gray-300">
@@ -331,11 +411,18 @@ services:
 
                 const accountsTable = document.getElementById('accountsTable');
                 accountsTable.innerHTML = '';
-                if (data.accounts.length === 0) {
-                  accountsTable.innerHTML = '<tr><td colspan="2" class="py-4 text-center text-gray-500">No hay cuentas creadas aún.</td></tr>';
+                 if (data.accounts.length === 0) {
+                  accountsTable.innerHTML = '<tr><td colspan="4" class="py-4 text-center text-gray-500">No hay cuentas creadas aún.</td></tr>';
                 } else {
                   data.accounts.forEach(acc => {
-                    accountsTable.innerHTML += '<tr class="hover:bg-gray-900/30 transition"><td class="py-3 font-medium">' + acc.email + '</td><td class="py-3 text-gray-400">' + acc.domain + '</td></tr>';
+                    accountsTable.innerHTML += '<tr class="hover:bg-gray-900/30 transition">' +
+                      '<td class="py-3 font-medium">' + acc.email + '</td>' +
+                      '<td class="py-3 text-gray-400">' + acc.domain + '</td>' +
+                      '<td class="py-3 text-gray-400">' + acc.quota + '</td>' +
+                      '<td class="py-3 text-right">' +
+                        '<button onclick="startEdit(\'' + acc.email + '\', \'' + acc.quota + '\')" class="text-xs bg-indigo-600/30 text-indigo-400 hover:bg-indigo-600 hover:text-white px-3 py-1 rounded-lg transition">Editar</button>' +
+                      '</td>' +
+                    '</tr>';
                   });
                 }
 
@@ -393,7 +480,7 @@ services:
               alert('¡Copiado al portapapeles!');
             }
 
-            function togglePassword() {
+             function togglePassword() {
               const passInput = document.getElementById('password');
               const eyeIcon = document.getElementById('eyeIcon');
               if (passInput.type === 'password') {
@@ -405,7 +492,30 @@ services:
               }
             }
 
-            document.getElementById('createForm').addEventListener('submit', async (e) => {
+            function toggleEditPassword() {
+              const passInput = document.getElementById('editPassword');
+              const eyeIcon = document.getElementById('editEyeIcon');
+              if (passInput.type === 'password') {
+                passInput.type = 'text';
+                eyeIcon.innerText = '🔒';
+              } else {
+                passInput.type = 'password';
+                eyeIcon.innerText = '👁️';
+              }
+            }
+
+            function startEdit(email, quota) {
+              document.getElementById('editCard').classList.remove('hidden');
+              document.getElementById('editEmail').value = email;
+              document.getElementById('editPassword').value = '';
+              const quotaSelect = document.getElementById('editQuota');
+              quotaSelect.value = quota === 'Ilimitado' ? '' : quota;
+              document.getElementById('editCard').scrollIntoView({ behavior: 'smooth' });
+            }
+
+            function cancelEdit() {
+              document.getElementById('editCard').classList.add('hidden');
+            }document.getElementById('createForm').addEventListener('submit', async (e) => {
               e.preventDefault();
               const email = document.getElementById('email').value;
               const password = document.getElementById('password').value;
@@ -442,6 +552,48 @@ services:
               } finally {
                 btn.disabled = false;
                 btn.innerText = 'Crear Cuenta y Registrar DNS';
+              }
+            });
+
+            document.getElementById('editForm').addEventListener('submit', async (e) => {
+              e.preventDefault();
+              const email = document.getElementById('editEmail').value;
+              const password = document.getElementById('editPassword').value;
+              const quota = document.getElementById('editQuota').value;
+              const btn = document.getElementById('editSubmitBtn');
+              const statusMsg = document.getElementById('editStatusMsg');
+
+              btn.disabled = true;
+              btn.innerText = 'Guardando...';
+              statusMsg.className = 'mt-4 text-center text-sm text-blue-400';
+              statusMsg.innerText = 'Actualizando cuenta...';
+              statusMsg.classList.remove('hidden');
+
+              try {
+                const res = await fetch('/api/accounts/update', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ email, password, quota })
+                });
+                const r = await res.json();
+                if (res.ok && r.success) {
+                  statusMsg.className = 'mt-4 text-center text-sm text-green-400';
+                  statusMsg.innerText = '¡Cuenta actualizada correctamente!';
+                  document.getElementById('editPassword').value = '';
+                  setTimeout(() => {
+                    document.getElementById('editCard').classList.add('hidden');
+                  }, 1500);
+                  await loadData();
+                } else {
+                  statusMsg.className = 'mt-4 text-center text-sm text-red-400';
+                  statusMsg.innerText = 'Error: ' + (r.error || 'No se pudo actualizar la cuenta.');
+                }
+              } catch (err) {
+                statusMsg.className = 'mt-4 text-center text-sm text-red-400';
+                statusMsg.innerText = 'Error de conexión con el servidor.';
+              } finally {
+                btn.disabled = false;
+                btn.innerText = 'Guardar Cambios';
               }
             });
 
